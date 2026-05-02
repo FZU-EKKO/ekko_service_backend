@@ -1,19 +1,15 @@
-ekko后端部署指南
+ekko backend
 
-1.创建虚拟环境
+1. create `.env` from `.env.example`
 
-```bash
-conda create -n ekko-backend_env python=3.10 -y
-```
-
-2.安装依赖
+2. install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3.启动指令
+3. start the server
 
 ```bash
-uvicorn main:ekko --reload
+uvicorn main:ekko --host 0.0.0.0 --port 8000 --reload
 ```
