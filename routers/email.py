@@ -1,11 +1,9 @@
-import os
-
-from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Query
 from fastapi_mail import MessageType
 from pydantic import NameEmail
 
 from config import cache_config
+from config.env import get_int_env
 from schemas.email import Email
 from utils import email
 from utils.random_string import gen_random_string
@@ -13,8 +11,6 @@ from utils.response import success_response
 
 
 ekko = APIRouter(prefix="/api/email", tags=["email"])
-
-load_dotenv()
 
 
 @ekko.post("/send")
@@ -34,11 +30,14 @@ async def get_verify_code(
     email_addr: str = Query(..., alias="email"),
     name: str = Query("user", alias="name"),
 ):
-    verify_code = gen_random_string(int(os.getenv("VERIFY_CODE_LENGTH")), False)
+    verify_code = gen_random_string(
+        get_int_env("EKKO_VERIFY_CODE_LENGTH", default=6),
+        False,
+    )
     cached = await cache_config.set_cache(
         email_addr,
         verify_code,
-        int(os.getenv("VERIFY_EXPIRE_TIME")),
+        get_int_env("EKKO_VERIFY_EXPIRE_TIME", default=120),
     )
     if not cached:
         raise HTTPException(status_code=500, detail="验证码缓存失败")

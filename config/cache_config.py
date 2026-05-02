@@ -1,18 +1,14 @@
 import json
-import os
 from typing import Any
 
 import redis.asyncio as redis
-from dotenv import load_dotenv
+from config.env import get_env, get_int_env
 
 
-load_dotenv()
-
-
-REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+REDIS_HOST = get_env("EKKO_REDIS_HOST", default="127.0.0.1")
+REDIS_PASSWORD = get_env("EKKO_REDIS_PASSWORD")
+REDIS_PORT = get_int_env("EKKO_REDIS_PORT", default=6379)
+REDIS_DB = get_int_env("EKKO_REDIS_DB", default=0)
 
 
 redis_client = redis.Redis(

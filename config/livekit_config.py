@@ -1,14 +1,13 @@
-import os
-
-from dotenv import load_dotenv
+from config.env import get_env, get_int_env
 
 
-load_dotenv()
-
-LIVEKIT_URL = os.getenv("LIVEKIT_URL", "")
-LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "")
-LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
-LIVEKIT_TOKEN_EXPIRE_SECONDS = int(os.getenv("LIVEKIT_TOKEN_EXPIRE_SECONDS", "3600"))
+LIVEKIT_URL = get_env("EKKO_LIVEKIT_URL", default="")
+LIVEKIT_API_KEY = get_env("EKKO_LIVEKIT_API_KEY", default="")
+LIVEKIT_API_SECRET = get_env("EKKO_LIVEKIT_API_SECRET", default="")
+LIVEKIT_TOKEN_EXPIRE_SECONDS = get_int_env(
+    "EKKO_LIVEKIT_TOKEN_EXPIRE_SECONDS",
+    default=3600,
+)
 
 
 def livekit_is_configured() -> bool:

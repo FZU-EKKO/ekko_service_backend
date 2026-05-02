@@ -1,24 +1,12 @@
-import os
-
-from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-load_dotenv()
-
-
-def _get_bool_env(name: str, default: bool = False) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+from config.env import get_bool_env, get_env, get_int_env
 
 
 async_engine = create_async_engine(
-    os.getenv("DATABASE_URL"),
-    echo=_get_bool_env("ECH0", False),
-    pool_size=int(os.getenv("POOL_SIZE", "10")),
-    max_overflow=int(os.getenv("MAX_OVERFLOW", "20")),
+    get_env("EKKO_DATABASE_URL"),
+    echo=get_bool_env("EKKO_DB_ECHO", default=False),
+    pool_size=get_int_env("EKKO_DB_POOL_SIZE", default=10),
+    max_overflow=get_int_env("EKKO_DB_MAX_OVERFLOW", default=20),
 )
 
 
