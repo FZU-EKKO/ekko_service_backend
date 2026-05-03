@@ -280,7 +280,7 @@ async def get_livekit_token(
     if not livekit_is_configured():
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="LiveKit 未配置，请设置 EKKO_LIVEKIT_URL、EKKO_LIVEKIT_API_KEY、EKKO_LIVEKIT_API_SECRET",
+            detail="LiveKit 未配置，请设置 EKKO_LIVEKIT_PUBLIC_URL 或 EKKO_LIVEKIT_URL，以及 EKKO_LIVEKIT_API_KEY、EKKO_LIVEKIT_API_SECRET",
         )
 
     connection_info = get_livekit_connection_info(

@@ -135,3 +135,39 @@ CREATE TABLE IF NOT EXISTS EKKO.voice_sessions (
     CONSTRAINT fk_session_channel FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
     INDEX idx_session_time (start_time, end_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS EKKO.transcript_sessions;
+CREATE TABLE IF NOT EXISTS EKKO.transcript_sessions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Transcript session ID',
+    channel_id BIGINT NOT NULL COMMENT 'Channel ID',
+    started_by CHAR(7) NOT NULL COMMENT 'Session owner user ID',
+    status ENUM('active', 'processing', 'completed', 'failed') DEFAULT 'active' COMMENT 'Transcript session status',
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Session start time',
+    ended_at TIMESTAMP NULL COMMENT 'Session end time',
+    last_error TEXT NULL COMMENT 'Last processing error',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Created at',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Updated at',
+    CONSTRAINT fk_transcript_session_channel FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
+    CONSTRAINT fk_transcript_session_user FOREIGN KEY (started_by) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_transcript_session_channel (channel_id),
+    INDEX idx_transcript_session_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS EKKO.transcript_segments;
+CREATE TABLE IF NOT EXISTS EKKO.transcript_segments (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Transcript segment ID',
+    session_id BIGINT NOT NULL COMMENT 'Transcript session ID',
+    user_id CHAR(7) NOT NULL COMMENT 'Speaker user ID',
+    seq_no INT NOT NULL COMMENT 'Per-session sequence number',
+    start_ms INT NOT NULL COMMENT 'Segment start timestamp in ms',
+    end_ms INT NOT NULL COMMENT 'Segment end timestamp in ms',
+    text TEXT NOT NULL COMMENT 'Transcript text',
+    is_final BOOLEAN DEFAULT TRUE COMMENT 'Whether the segment is finalized',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Created at',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Updated at',
+    CONSTRAINT fk_transcript_segment_session FOREIGN KEY (session_id) REFERENCES transcript_sessions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_transcript_segment_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_transcript_segment_session (session_id),
+    INDEX idx_transcript_segment_user (user_id),
+    INDEX idx_transcript_segment_seq (session_id, seq_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -2,9 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from routers import users, domain, channel, email, upload
+from routers import users, domain, channel, email, upload, transcript
 from utils.exception_handler import register_exception_handler
 from utils.file_storage import UPLOAD_ROOT, ensure_upload_dirs
+from utils.transcript_runtime import transcript_runtime
 
 ekko = FastAPI()
 
@@ -16,8 +17,19 @@ ekko.include_router(domain.ekko)
 ekko.include_router(channel.ekko)
 ekko.include_router(email.ekko)
 ekko.include_router(upload.ekko)
+ekko.include_router(transcript.ekko)
 
 ekko.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
+
+
+@ekko.on_event("startup")
+async def startup_transcript_runtime():
+    await transcript_runtime.start()
+
+
+@ekko.on_event("shutdown")
+async def shutdown_transcript_runtime():
+    await transcript_runtime.stop()
 
 
 origins=[

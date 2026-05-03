@@ -8,7 +8,7 @@ from config.livekit_config import (
     LIVEKIT_API_KEY,
     LIVEKIT_API_SECRET,
     LIVEKIT_TOKEN_EXPIRE_SECONDS,
-    LIVEKIT_URL,
+    get_livekit_public_url,
     livekit_is_configured,
 )
 
@@ -69,7 +69,7 @@ def get_livekit_connection_info(*, identity: str, room_name: str, participant_na
         participant_name=participant_name,
     )
     return {
-        "livekit_url": LIVEKIT_URL,
+        "livekit_url": get_livekit_public_url(),
         "token": token,
         "room_name": room_name,
         "participant_identity": identity,
