@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import BIGINT, CHAR, DateTime, Enum, ForeignKeyConstraint, Index, Integer, PrimaryKeyConstraint, Text
+from sqlalchemy import BIGINT, CHAR, JSON, DateTime, Enum, ForeignKeyConstraint, Index, Integer, PrimaryKeyConstraint, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base
@@ -57,3 +57,4 @@ class TranscriptSegments(Base):
     end_ms: Mapped[int] = mapped_column(Integer, nullable=False, comment="Segment end timestamp in ms")
     text: Mapped[str] = mapped_column(Text, nullable=False, comment="Transcript text")
     is_final: Mapped[bool] = mapped_column(default=True, comment="Whether the segment is finalized")
+    words: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True, comment="Word-level timestamps")

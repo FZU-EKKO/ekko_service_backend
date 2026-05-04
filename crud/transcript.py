@@ -50,6 +50,7 @@ async def create_transcript_segment(
     end_ms: int,
     text: str,
     is_final: bool = True,
+    words: list[dict] | None = None,
 ):
     segment = TranscriptSegments(
         session_id=session_id,
@@ -59,6 +60,7 @@ async def create_transcript_segment(
         end_ms=end_ms,
         text=text,
         is_final=is_final,
+        words=words,
     )
     db.add(segment)
     await db.commit()

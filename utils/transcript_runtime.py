@@ -243,6 +243,7 @@ class TranscriptRuntime:
                             end_ms=task.end_ms,
                             text=result.text.strip(),
                             is_final=True,
+                            words=result.words,
                         )
                     async with self._lock:
                         state = self._streams.setdefault((task.session_id, task.user_id), UserStreamState())

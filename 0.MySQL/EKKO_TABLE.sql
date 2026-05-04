@@ -1,9 +1,9 @@
-DROP DATABASE IF EXISTS EKKO;
-CREATE DATABASE IF NOT EXISTS EKKO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE EKKO;
+DROP DATABASE IF EXISTS ekko;
+CREATE DATABASE IF NOT EXISTS ekko CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE ekko;
 
-DROP TABLE IF EXISTS EKKO.users;
-CREATE TABLE IF NOT EXISTS EKKO.users (
+DROP TABLE IF EXISTS ekko.users;
+CREATE TABLE IF NOT EXISTS ekko.users (
     id CHAR(7) PRIMARY KEY COMMENT '用户ID',
     avatar TEXT NULL COMMENT '头像URL',
     nick_name VARCHAR(20) NOT NULL COMMENT '昵称',
@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS EKKO.users (
     INDEX idx_user_id (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS EKKO.user_token;
-CREATE TABLE IF NOT EXISTS EKKO.user_token (
+DROP TABLE IF EXISTS ekko.user_token;
+CREATE TABLE IF NOT EXISTS ekko.user_token (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
     user_id CHAR(7) NOT NULL COMMENT '关联用户ID',
     token VARCHAR(255) UNIQUE NOT NULL COMMENT '令牌值',
@@ -30,8 +30,8 @@ CREATE TABLE IF NOT EXISTS EKKO.user_token (
     INDEX idx_user_id (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS EKKO.domain;
-CREATE TABLE IF NOT EXISTS EKKO.domain (
+DROP TABLE IF EXISTS ekko.domain;
+CREATE TABLE IF NOT EXISTS ekko.domain (
     id CHAR(8) PRIMARY KEY COMMENT '域ID',
     create_id CHAR(7) NOT NULL COMMENT '创建者ID',
     avatar TEXT NULL COMMENT '域头像URL或Base64',
@@ -44,8 +44,8 @@ CREATE TABLE IF NOT EXISTS EKKO.domain (
     INDEX idx_domain_id (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS EKKO.domain_members;
-CREATE TABLE IF NOT EXISTS EKKO.domain_members (
+DROP TABLE IF EXISTS ekko.domain_members;
+CREATE TABLE IF NOT EXISTS ekko.domain_members (
     domain_id CHAR(8) NOT NULL COMMENT '域ID',
     member_id CHAR(7) NOT NULL COMMENT '成员ID',
     alias VARCHAR(50) NULL COMMENT '域内别名',
@@ -59,8 +59,8 @@ CREATE TABLE IF NOT EXISTS EKKO.domain_members (
     INDEX idx_domain_member (member_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS EKKO.channels;
-CREATE TABLE IF NOT EXISTS EKKO.channels (
+DROP TABLE IF EXISTS ekko.channels;
+CREATE TABLE IF NOT EXISTS ekko.channels (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '频道ID',
     domain_id CHAR(8) NOT NULL COMMENT '所属域ID',
     channel_name VARCHAR(255) NOT NULL COMMENT '频道名称',
@@ -76,8 +76,8 @@ CREATE TABLE IF NOT EXISTS EKKO.channels (
     INDEX idx_channel_domain (domain_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS EKKO.channel_members;
-CREATE TABLE IF NOT EXISTS EKKO.channel_members (
+DROP TABLE IF EXISTS ekko.channel_members;
+CREATE TABLE IF NOT EXISTS ekko.channel_members (
     channel_id BIGINT NOT NULL COMMENT '频道ID',
     member_id CHAR(7) NOT NULL COMMENT '成员ID',
     join_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '加入时间',
@@ -92,8 +92,8 @@ CREATE TABLE IF NOT EXISTS EKKO.channel_members (
     INDEX idx_channel_member_user (member_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS EKKO.voice_process;
-CREATE TABLE IF NOT EXISTS EKKO.voice_process (
+DROP TABLE IF EXISTS ekko.voice_process;
+CREATE TABLE IF NOT EXISTS ekko.voice_process (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '语音记录ID',
     domain_id CHAR(8) NOT NULL COMMENT '域ID',
     channel_id BIGINT NOT NULL COMMENT '频道ID',
@@ -119,8 +119,8 @@ CREATE TABLE IF NOT EXISTS EKKO.voice_process (
     INDEX idx_voice_time (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS EKKO.voice_sessions;
-CREATE TABLE IF NOT EXISTS EKKO.voice_sessions (
+DROP TABLE IF EXISTS ekko.voice_sessions;
+CREATE TABLE IF NOT EXISTS ekko.voice_sessions (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '会话ID',
     domain_id CHAR(8) NOT NULL COMMENT '域ID',
     channel_id BIGINT NOT NULL COMMENT '频道ID',
@@ -136,8 +136,8 @@ CREATE TABLE IF NOT EXISTS EKKO.voice_sessions (
     INDEX idx_session_time (start_time, end_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS EKKO.transcript_sessions;
-CREATE TABLE IF NOT EXISTS EKKO.transcript_sessions (
+DROP TABLE IF EXISTS ekko.transcript_sessions;
+CREATE TABLE IF NOT EXISTS ekko.transcript_sessions (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Transcript session ID',
     channel_id BIGINT NOT NULL COMMENT 'Channel ID',
     started_by CHAR(7) NOT NULL COMMENT 'Session owner user ID',
@@ -153,8 +153,8 @@ CREATE TABLE IF NOT EXISTS EKKO.transcript_sessions (
     INDEX idx_transcript_session_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS EKKO.transcript_segments;
-CREATE TABLE IF NOT EXISTS EKKO.transcript_segments (
+DROP TABLE IF EXISTS ekko.transcript_segments;
+CREATE TABLE IF NOT EXISTS ekko.transcript_segments (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Transcript segment ID',
     session_id BIGINT NOT NULL COMMENT 'Transcript session ID',
     user_id CHAR(7) NOT NULL COMMENT 'Speaker user ID',
@@ -163,6 +163,7 @@ CREATE TABLE IF NOT EXISTS EKKO.transcript_segments (
     end_ms INT NOT NULL COMMENT 'Segment end timestamp in ms',
     text TEXT NOT NULL COMMENT 'Transcript text',
     is_final BOOLEAN DEFAULT TRUE COMMENT 'Whether the segment is finalized',
+    words JSON NULL COMMENT 'Word-level timestamps',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Created at',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Updated at',
     CONSTRAINT fk_transcript_segment_session FOREIGN KEY (session_id) REFERENCES transcript_sessions(id) ON DELETE CASCADE,

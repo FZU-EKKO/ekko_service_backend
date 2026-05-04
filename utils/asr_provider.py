@@ -16,6 +16,7 @@ from config.asr_config import ASR_LANGUAGE, ASR_REMOTE_TIMEOUT_SECONDS, ASR_REMO
 @dataclass
 class AsrResult:
     text: str
+    words: list[dict] | None = None
 
 
 class AsrProvider(Protocol):
@@ -102,7 +103,11 @@ class RemoteAsrProvider:
         text = str(data.get("text", "")).strip()
         if not text:
             raise RuntimeError("Remote ASR response missing 'text'")
-        return AsrResult(text=text)
+        words = data.get("words")
+        return AsrResult(
+            text=text,
+            words=words if isinstance(words, list) else None,
+        )
 
     async def transcribe_pcm16(
         self,

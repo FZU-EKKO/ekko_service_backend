@@ -2,6 +2,7 @@ import json
 from typing import Any
 
 import redis.asyncio as redis
+
 from config.env import get_env, get_int_env
 
 
@@ -23,8 +24,8 @@ redis_client = redis.Redis(
 async def get_cache(key: str):
     try:
         return await redis_client.get(key)
-    except Exception as e:
-        print(f"获取缓存失败: {e}")
+    except Exception as exc:
+        print(f"Failed to get cache: {exc}")
         return None
 
 
@@ -34,8 +35,8 @@ async def get_json_cache(key: str):
         if data:
             return json.loads(data)
         return None
-    except Exception as e:
-        print(f"获取 JSON 缓存失败: {e}")
+    except Exception as exc:
+        print(f"Failed to get JSON cache: {exc}")
         return None
 
 
@@ -45,6 +46,44 @@ async def set_cache(key: str, value: Any, expire: int = 60 * 2):
             value = json.dumps(value, ensure_ascii=False)
         await redis_client.set(key, value, expire)
         return True
-    except Exception as e:
-        print(f"设置缓存失败: {e}")
+    except Exception as exc:
+        print(f"Failed to set cache: {exc}")
         return False
+
+
+async def delete_cache(key: str):
+    try:
+        await redis_client.delete(key)
+        return True
+    except Exception as exc:
+        print(f"Failed to delete cache: {exc}")
+        return False
+
+
+async def push_json_list(key: str, value: Any, expire: int = 60 * 30):
+    try:
+        await redis_client.rpush(key, json.dumps(value, ensure_ascii=False))
+        await redis_client.expire(key, expire)
+        return True
+    except Exception as exc:
+        print(f"Failed to push JSON list cache: {exc}")
+        return False
+
+
+async def incr_cache(key: str, expire: int = 60 * 30):
+    try:
+        value = await redis_client.incr(key)
+        await redis_client.expire(key, expire)
+        return int(value)
+    except Exception as exc:
+        print(f"Failed to increment cache: {exc}")
+        return None
+
+
+async def get_json_list(key: str, start: int = 0, end: int = -1):
+    try:
+        rows = await redis_client.lrange(key, start, end)
+        return [json.loads(item) for item in rows]
+    except Exception as exc:
+        print(f"Failed to get JSON list cache: {exc}")
+        return []

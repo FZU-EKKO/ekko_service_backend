@@ -42,6 +42,7 @@ class TranscriptSegmentInfo(BaseModel):
     end_ms: int
     text: str
     is_final: bool
+    words: list[dict] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -51,3 +52,9 @@ class TranscriptSegmentInfo(BaseModel):
 class TranscriptSegmentsResponse(BaseModel):
     total: int
     segments: list[TranscriptSegmentInfo]
+
+
+class TranscriptLiveStateResponse(BaseModel):
+    meta: dict
+    partials: dict[str, dict]
+    segments: list[dict]

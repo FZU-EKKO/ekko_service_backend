@@ -4,6 +4,7 @@ from config.env import get_env, get_int_env
 ASR_PROVIDER = get_env("EKKO_ASR_PROVIDER", default="remote")
 ASR_LANGUAGE = get_env("EKKO_ASR_LANGUAGE", default="zh")
 ASR_REMOTE_URL = get_env("EKKO_ASR_REMOTE_URL", default="")
+ASR_REMOTE_WS_URL = get_env("EKKO_ASR_REMOTE_WS_URL", default="")
 ASR_REMOTE_TOKEN = get_env("EKKO_ASR_REMOTE_TOKEN", default="")
 ASR_REMOTE_TIMEOUT_SECONDS = get_int_env("EKKO_ASR_REMOTE_TIMEOUT_SECONDS", default=30)
 ASR_ENERGY_THRESHOLD = get_int_env("EKKO_ASR_ENERGY_THRESHOLD", default=450)
