@@ -63,7 +63,7 @@ async def update_domain(db: AsyncSession, domain_update: DomainUpdateRequest):
     query = (
         update(Domains)
         .where(Domains.id == domain_update.id)
-        .values(**domain_update.model_dump(exclude_unset=True, exclude_none=True))
+        .values(**domain_update.model_dump(exclude_unset=True))
     )
     update_result = await db.execute(query)
     if update_result.rowcount == 0:

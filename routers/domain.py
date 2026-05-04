@@ -95,7 +95,7 @@ async def updated_domain(
     updated = await domain.update_domain(db, domain_update)
     if not updated:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="域更新失败")
-    if domain_update.avatar != previous_avatar:
+    if updated.avatar != previous_avatar:
         delete_uploaded_file(previous_avatar)
 
     return success_response(

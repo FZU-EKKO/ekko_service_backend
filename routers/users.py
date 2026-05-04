@@ -101,7 +101,7 @@ async def update_user_info(
     updated_user = await users.update_user(db, user.id, update_user)
     if not updated_user:
         raise HTTPException(status_code=404, detail="User not found")
-    if update_user.avatar != previous_avatar:
+    if updated_user.avatar != previous_avatar:
         delete_uploaded_file(previous_avatar)
     return success_response(
         message="User info updated successfully",

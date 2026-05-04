@@ -89,7 +89,7 @@ async def get_user_by_token(db: AsyncSession, token: str):
 
 
 async def update_user(db: AsyncSession, user_id: str, user: UpdateUsersRequest):
-    payload = user.model_dump(exclude_unset=True, exclude_none=True)
+    payload = user.model_dump(exclude_unset=True)
     if "pwd" in payload:
         payload["pwd"] = security.get_hash_password(payload["pwd"])
 
