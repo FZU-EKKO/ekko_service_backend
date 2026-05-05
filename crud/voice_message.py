@@ -81,6 +81,30 @@ async def select_voice_messages_by_channel(
     return result.all()
 
 
+async def select_transcript_voice_messages_by_channel(
+    db: AsyncSession,
+    channel_id: int,
+    *,
+    limit: int | None = None,
+):
+    query = (
+        select(VoiceMessages, Users)
+        .join(Users, Users.id == VoiceMessages.user_id)
+        .where(
+            (VoiceMessages.channel_id == channel_id)
+            & (VoiceMessages.transcript_text.is_not(None))
+            & (VoiceMessages.transcript_text != "")
+        )
+        .order_by(VoiceMessages.created_at.desc(), VoiceMessages.id.desc())
+    )
+    if limit is not None:
+        query = query.limit(limit)
+    result = await db.execute(query)
+    rows = list(result.all())
+    rows.reverse()
+    return rows
+
+
 async def update_voice_message_transcript(
     db: AsyncSession,
     voice_message_id: int,
