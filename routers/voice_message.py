@@ -13,8 +13,8 @@ from models.channel import ChannelType
 from models.users import Users
 from schemas.voice_message import VoiceMessageInfo, VoiceMessagePage, VoiceMessageUserInfo
 from utils.auth import get_current_user
-from utils.pagination import compute_pagination_params
 from utils.file_storage import save_voice_message_upload
+from utils.voice_message_excitement import analyze_and_persist_voice_message_excitement
 from utils.response import success_response
 from utils.voice_message_transcriber import transcribe_uploaded_audio
 
@@ -64,6 +64,9 @@ def _build_voice_message_info(record, sender: Users) -> VoiceMessageInfo:
         file_size=record.file_size,
         transcript_text=record.transcript_text,
         waveform=record.waveform,
+        avg_amplitude=record.avg_amplitude,
+        avg_frequency=record.avg_frequency,
+        is_excited=record.is_excited,
         created_at=record.created_at,
         updated_at=record.updated_at,
         user=VoiceMessageUserInfo(
@@ -136,6 +139,23 @@ async def upload_voice_message(
         transcript_text=(transcript_text or "").strip() or None,
         waveform=waveform_payload,
     )
+    try:
+        await analyze_and_persist_voice_message_excitement(
+            db,
+            voice_message_id=created.id,
+            channel_id=created.channel_id,
+            user_id=created.user_id,
+            relative_audio_path=created.audio_path,
+        )
+        created = await voice_message.select_voice_message_by_id(db, created.id) or created
+    except Exception as exc:
+        logger.warning(
+            "voice_message_excitement_analysis_failed id=%s path=%s format=%s detail=%s",
+            created.id,
+            created.audio_path,
+            created.audio_format,
+            exc,
+        )
     if not created.transcript_text:
         try:
             result = transcribe_uploaded_audio(created.audio_path)
@@ -161,7 +181,6 @@ async def upload_voice_message(
 @ekko.get("/channel/{channel_id}")
 async def list_voice_messages_by_channel(
     channel_id: int,
-    _pagination=Depends(compute_pagination_params),
     user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -170,12 +189,10 @@ async def list_voice_messages_by_channel(
     rows = await voice_message.select_voice_messages_by_channel(
         db,
         channel_id,
-        offset=_pagination["offset"],
-        limit=_pagination["limit"],
     )
     payload = [
         _build_voice_message_info(record, sender)
-        for record, sender in reversed(rows)
+        for record, sender in rows
     ]
     return success_response(
         message="Voice messages fetched",

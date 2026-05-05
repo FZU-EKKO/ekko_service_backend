@@ -2,6 +2,7 @@ DROP DATABASE IF EXISTS ekko;
 CREATE DATABASE IF NOT EXISTS ekko CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE ekko;
 
+DROP TABLE IF EXISTS ekko.user_channel_voice_profile;
 DROP TABLE IF EXISTS ekko.voice_messages;
 DROP TABLE IF EXISTS ekko.channel_members;
 DROP TABLE IF EXISTS ekko.channels;
@@ -106,6 +107,9 @@ CREATE TABLE IF NOT EXISTS ekko.voice_messages (
     file_size BIGINT DEFAULT 0 COMMENT '音频文件大小，字节',
     transcript_text TEXT NULL COMMENT '可选转写文本',
     waveform JSON NULL COMMENT '波形预览数组',
+    avg_amplitude DOUBLE NULL COMMENT '当前句子的平均幅值（希尔伯特变换）',
+    avg_frequency DOUBLE NULL COMMENT '当前句子的平均频率（希尔伯特变换）',
+    is_excited BOOLEAN NOT NULL DEFAULT FALSE COMMENT '当前句子是否判定为激动发言',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     CONSTRAINT fk_voice_message_channel FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
@@ -113,4 +117,20 @@ CREATE TABLE IF NOT EXISTS ekko.voice_messages (
     INDEX idx_voice_message_channel_created (channel_id, created_at),
     INDEX idx_voice_message_user_created (user_id, created_at),
     INDEX idx_voice_message_client_id (client_message_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ekko.user_channel_voice_profile (
+    channel_id BIGINT NOT NULL COMMENT '频道ID',
+    user_id CHAR(7) NOT NULL COMMENT '用户ID',
+    historical_avg_amplitude DOUBLE NOT NULL DEFAULT 0 COMMENT '该用户在该频道历史句子平均幅值的平均值',
+    historical_avg_frequency DOUBLE NOT NULL DEFAULT 0 COMMENT '该用户在该频道历史句子平均频率的平均值',
+    total_sentence_count INT NOT NULL DEFAULT 0 COMMENT '该用户在该频道的总发言句数',
+    baseline_sentence_count INT NOT NULL DEFAULT 0 COMMENT '纳入历史均值的句数，上限500',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    CONSTRAINT pk_user_channel_voice_profile PRIMARY KEY (channel_id, user_id),
+    CONSTRAINT fk_voice_profile_channel FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
+    CONSTRAINT fk_voice_profile_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_voice_profile_user (user_id),
+    INDEX idx_voice_profile_baseline_count (baseline_sentence_count)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

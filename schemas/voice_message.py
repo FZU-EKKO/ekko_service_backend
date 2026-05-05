@@ -21,6 +21,9 @@ class VoiceMessageInfo(BaseModel):
     file_size: int
     transcript_text: str | None = None
     waveform: list[int] | None = None
+    avg_amplitude: float | None = None
+    avg_frequency: float | None = None
+    is_excited: bool = False
     created_at: datetime
     updated_at: datetime
     user: VoiceMessageUserInfo
@@ -47,6 +50,9 @@ class VoiceMessageRecord(BaseModel):
     file_size: int
     transcript_text: str | None = None
     waveform: list[int] | None = None
+    avg_amplitude: float | None = None
+    avg_frequency: float | None = None
+    is_excited: bool = False
     created_at: datetime
     updated_at: datetime
 

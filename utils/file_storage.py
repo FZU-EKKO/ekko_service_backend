@@ -21,16 +21,11 @@ ALLOWED_IMAGE_CONTENT_TYPES = {
     "image/gif",
 }
 MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
-ALLOWED_AUDIO_EXTENSIONS = {".webm", ".ogg", ".wav", ".mp3", ".m4a"}
+ALLOWED_AUDIO_EXTENSIONS = {".wav"}
 ALLOWED_AUDIO_CONTENT_TYPES = {
-    "audio/webm",
-    "audio/ogg",
     "audio/wav",
     "audio/wave",
     "audio/x-wav",
-    "audio/mpeg",
-    "audio/mp4",
-    "audio/x-m4a",
 }
 MAX_AUDIO_SIZE_BYTES = 15 * 1024 * 1024
 

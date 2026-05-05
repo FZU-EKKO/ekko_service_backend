@@ -1,9 +1,11 @@
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.channel import ChannelMembers, Channels, ChannelType
+from models.user_channel_voice_profile import UserChannelVoiceProfile
+from models.voice_message import VoiceMessages
 
 
 async def select_channel_id(db: AsyncSession, channel_id: int):
@@ -77,6 +79,9 @@ async def delete_channel(db: AsyncSession, channel_id: int):
     current_channel = await select_channel_id(db, channel_id)
     if not current_channel:
         return False
+    await db.execute(delete(VoiceMessages).where(VoiceMessages.channel_id == channel_id))
+    await db.execute(delete(UserChannelVoiceProfile).where(UserChannelVoiceProfile.channel_id == channel_id))
+    await db.execute(delete(ChannelMembers).where(ChannelMembers.channel_id == channel_id))
     await db.delete(current_channel)
     await db.commit()
     return True
