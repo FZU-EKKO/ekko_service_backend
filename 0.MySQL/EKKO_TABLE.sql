@@ -2,7 +2,14 @@ DROP DATABASE IF EXISTS ekko;
 CREATE DATABASE IF NOT EXISTS ekko CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE ekko;
 
+DROP TABLE IF EXISTS ekko.voice_messages;
+DROP TABLE IF EXISTS ekko.channel_members;
+DROP TABLE IF EXISTS ekko.channels;
+DROP TABLE IF EXISTS ekko.domain_members;
+DROP TABLE IF EXISTS ekko.domain;
+DROP TABLE IF EXISTS ekko.user_token;
 DROP TABLE IF EXISTS ekko.users;
+
 CREATE TABLE IF NOT EXISTS ekko.users (
     id CHAR(7) PRIMARY KEY COMMENT '用户ID',
     avatar TEXT NULL COMMENT '头像URL',
@@ -17,9 +24,8 @@ CREATE TABLE IF NOT EXISTS ekko.users (
     INDEX idx_user_id (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS ekko.user_token;
 CREATE TABLE IF NOT EXISTS ekko.user_token (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '令牌ID',
     user_id CHAR(7) NOT NULL COMMENT '关联用户ID',
     token VARCHAR(255) UNIQUE NOT NULL COMMENT '令牌值',
     expires_at TIMESTAMP NOT NULL COMMENT '过期时间',
@@ -30,11 +36,10 @@ CREATE TABLE IF NOT EXISTS ekko.user_token (
     INDEX idx_user_id (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS ekko.domain;
 CREATE TABLE IF NOT EXISTS ekko.domain (
     id CHAR(8) PRIMARY KEY COMMENT '域ID',
     create_id CHAR(7) NOT NULL COMMENT '创建者ID',
-    avatar TEXT NULL COMMENT '域头像URL或Base64',
+    avatar TEXT NULL COMMENT '域头像URL',
     domain_name VARCHAR(255) NOT NULL COMMENT '域名称',
     description TEXT COMMENT '域描述',
     is_public BOOLEAN DEFAULT TRUE COMMENT '是否公开域',
@@ -44,7 +49,6 @@ CREATE TABLE IF NOT EXISTS ekko.domain (
     INDEX idx_domain_id (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS ekko.domain_members;
 CREATE TABLE IF NOT EXISTS ekko.domain_members (
     domain_id CHAR(8) NOT NULL COMMENT '域ID',
     member_id CHAR(7) NOT NULL COMMENT '成员ID',
@@ -59,7 +63,6 @@ CREATE TABLE IF NOT EXISTS ekko.domain_members (
     INDEX idx_domain_member (member_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS ekko.channels;
 CREATE TABLE IF NOT EXISTS ekko.channels (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '频道ID',
     domain_id CHAR(8) NOT NULL COMMENT '所属域ID',
@@ -76,7 +79,6 @@ CREATE TABLE IF NOT EXISTS ekko.channels (
     INDEX idx_channel_domain (domain_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS ekko.channel_members;
 CREATE TABLE IF NOT EXISTS ekko.channel_members (
     channel_id BIGINT NOT NULL COMMENT '频道ID',
     member_id CHAR(7) NOT NULL COMMENT '成员ID',
@@ -92,83 +94,23 @@ CREATE TABLE IF NOT EXISTS ekko.channel_members (
     INDEX idx_channel_member_user (member_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS ekko.voice_process;
-CREATE TABLE IF NOT EXISTS ekko.voice_process (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '语音记录ID',
-    domain_id CHAR(8) NOT NULL COMMENT '域ID',
+CREATE TABLE IF NOT EXISTS ekko.voice_messages (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '语音消息ID',
     channel_id BIGINT NOT NULL COMMENT '频道ID',
-    member_id CHAR(7) NOT NULL COMMENT '发言人ID',
-    voice_address TEXT NOT NULL COMMENT '语音文件地址',
-    voice2text TEXT COMMENT '语音转文字结果',
-    voice_duration INT DEFAULT 0 COMMENT '语音时长(秒)',
-    audio_format VARCHAR(20) DEFAULT 'mp3' COMMENT '音频格式',
-    file_size BIGINT COMMENT '文件大小(字节)',
-    analysis_tags JSON COMMENT '分析标签JSON',
-    sentiment_label VARCHAR(20) COMMENT '情感标签',
-    confidence_score FLOAT DEFAULT 0.0 COMMENT '分析置信度',
-    is_processed BOOLEAN DEFAULT FALSE COMMENT '是否已处理',
-    processed_time TIMESTAMP NULL COMMENT '处理完成时间',
+    user_id CHAR(7) NOT NULL COMMENT '发送者用户ID',
+    client_message_id VARCHAR(64) NULL COMMENT '客户端消息ID，用于去重',
+    audio_path TEXT NOT NULL COMMENT '音频存储路径',
+    audio_duration_ms INT DEFAULT 0 COMMENT '音频时长，毫秒',
+    audio_format VARCHAR(20) DEFAULT 'webm' COMMENT '音频格式',
+    mime_type VARCHAR(100) NULL COMMENT '音频MIME类型',
+    file_size BIGINT DEFAULT 0 COMMENT '音频文件大小，字节',
+    transcript_text TEXT NULL COMMENT '可选转写文本',
+    waveform JSON NULL COMMENT '波形预览数组',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    CONSTRAINT fk_voice_domain FOREIGN KEY (domain_id) REFERENCES domain(id) ON DELETE CASCADE,
-    CONSTRAINT fk_voice_channel FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
-    CONSTRAINT fk_voice_member FOREIGN KEY (member_id) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_voice_domain_channel_time (domain_id, channel_id, created_at),
-    INDEX idx_voice_member_time (member_id, created_at),
-    INDEX idx_voice_processed (is_processed, created_at),
-    INDEX idx_voice_time (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-DROP TABLE IF EXISTS ekko.voice_sessions;
-CREATE TABLE IF NOT EXISTS ekko.voice_sessions (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '会话ID',
-    domain_id CHAR(8) NOT NULL COMMENT '域ID',
-    channel_id BIGINT NOT NULL COMMENT '频道ID',
-    session_uuid BIGINT UNIQUE COMMENT '会话唯一标识',
-    start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '开始时间',
-    end_time TIMESTAMP NULL COMMENT '结束时间',
-    total_duration INT DEFAULT 0 COMMENT '总时长(秒)',
-    participant_count INT DEFAULT 0 COMMENT '参与人数',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    CONSTRAINT fk_session_domain FOREIGN KEY (domain_id) REFERENCES domain(id) ON DELETE CASCADE,
-    CONSTRAINT fk_session_channel FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
-    INDEX idx_session_time (start_time, end_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-DROP TABLE IF EXISTS ekko.transcript_sessions;
-CREATE TABLE IF NOT EXISTS ekko.transcript_sessions (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Transcript session ID',
-    channel_id BIGINT NOT NULL COMMENT 'Channel ID',
-    started_by CHAR(7) NOT NULL COMMENT 'Session owner user ID',
-    status ENUM('active', 'processing', 'completed', 'failed') DEFAULT 'active' COMMENT 'Transcript session status',
-    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Session start time',
-    ended_at TIMESTAMP NULL COMMENT 'Session end time',
-    last_error TEXT NULL COMMENT 'Last processing error',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Created at',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Updated at',
-    CONSTRAINT fk_transcript_session_channel FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
-    CONSTRAINT fk_transcript_session_user FOREIGN KEY (started_by) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_transcript_session_channel (channel_id),
-    INDEX idx_transcript_session_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-DROP TABLE IF EXISTS ekko.transcript_segments;
-CREATE TABLE IF NOT EXISTS ekko.transcript_segments (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT 'Transcript segment ID',
-    session_id BIGINT NOT NULL COMMENT 'Transcript session ID',
-    user_id CHAR(7) NOT NULL COMMENT 'Speaker user ID',
-    seq_no INT NOT NULL COMMENT 'Per-session sequence number',
-    start_ms INT NOT NULL COMMENT 'Segment start timestamp in ms',
-    end_ms INT NOT NULL COMMENT 'Segment end timestamp in ms',
-    text TEXT NOT NULL COMMENT 'Transcript text',
-    is_final BOOLEAN DEFAULT TRUE COMMENT 'Whether the segment is finalized',
-    words JSON NULL COMMENT 'Word-level timestamps',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'Created at',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Updated at',
-    CONSTRAINT fk_transcript_segment_session FOREIGN KEY (session_id) REFERENCES transcript_sessions(id) ON DELETE CASCADE,
-    CONSTRAINT fk_transcript_segment_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_transcript_segment_session (session_id),
-    INDEX idx_transcript_segment_user (user_id),
-    INDEX idx_transcript_segment_seq (session_id, seq_no)
+    CONSTRAINT fk_voice_message_channel FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
+    CONSTRAINT fk_voice_message_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_voice_message_channel_created (channel_id, created_at),
+    INDEX idx_voice_message_user_created (user_id, created_at),
+    INDEX idx_voice_message_client_id (client_message_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
