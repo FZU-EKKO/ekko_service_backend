@@ -37,6 +37,7 @@ async def create_voice_message(
     waveform: list[int] | None = None,
     avg_amplitude: float | None = None,
     avg_frequency: float | None = None,
+    avg_char_rate: float | None = None,
     is_excited: bool = False,
 ):
     voice_message = VoiceMessages(
@@ -52,6 +53,7 @@ async def create_voice_message(
         waveform=waveform,
         avg_amplitude=avg_amplitude,
         avg_frequency=avg_frequency,
+        avg_char_rate=avg_char_rate,
         is_excited=is_excited,
     )
     db.add(voice_message)
@@ -133,6 +135,7 @@ async def update_voice_message_analysis(
     *,
     avg_amplitude: float | None,
     avg_frequency: float | None,
+    avg_char_rate: float | None,
     is_excited: bool,
 ):
     record = await select_voice_message_by_id(db, voice_message_id)
@@ -140,6 +143,7 @@ async def update_voice_message_analysis(
         return None
     record.avg_amplitude = avg_amplitude
     record.avg_frequency = avg_frequency
+    record.avg_char_rate = avg_char_rate
     record.is_excited = is_excited
     await db.commit()
     await db.refresh(record)
@@ -185,12 +189,16 @@ async def update_user_channel_voice_profile(
     user_id: str,
     historical_avg_amplitude: float,
     historical_avg_frequency: float,
+    historical_avg_char_rate: float,
+    char_rate_sample_count: int,
     total_sentence_count: int,
     baseline_sentence_count: int,
 ):
     profile = await create_or_get_user_channel_voice_profile(db, channel_id=channel_id, user_id=user_id)
     profile.historical_avg_amplitude = historical_avg_amplitude
     profile.historical_avg_frequency = historical_avg_frequency
+    profile.historical_avg_char_rate = historical_avg_char_rate
+    profile.char_rate_sample_count = char_rate_sample_count
     profile.total_sentence_count = total_sentence_count
     profile.baseline_sentence_count = baseline_sentence_count
     await db.commit()

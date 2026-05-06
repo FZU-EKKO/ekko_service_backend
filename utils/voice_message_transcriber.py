@@ -46,7 +46,12 @@ def should_bypass_proxy(url: str) -> bool:
     if hostname == "localhost":
         return True
     try:
-        return ipaddress.ip_address(hostname).is_loopback
+        address = ipaddress.ip_address(hostname)
+        return (
+            address.is_loopback
+            or address.is_private
+            or address.is_link_local
+        )
     except ValueError:
         return False
 

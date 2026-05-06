@@ -23,6 +23,7 @@ class VoiceMessageInfo(BaseModel):
     waveform: list[int] | None = None
     avg_amplitude: float | None = None
     avg_frequency: float | None = None
+    avg_char_rate: float | None = None
     is_excited: bool = False
     created_at: datetime
     updated_at: datetime
@@ -52,6 +53,7 @@ class VoiceMessageRecord(BaseModel):
     waveform: list[int] | None = None
     avg_amplitude: float | None = None
     avg_frequency: float | None = None
+    avg_char_rate: float | None = None
     is_excited: bool = False
     created_at: datetime
     updated_at: datetime

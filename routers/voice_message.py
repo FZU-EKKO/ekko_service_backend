@@ -66,6 +66,7 @@ def _build_voice_message_info(record, sender: Users) -> VoiceMessageInfo:
         waveform=record.waveform,
         avg_amplitude=record.avg_amplitude,
         avg_frequency=record.avg_frequency,
+        avg_char_rate=record.avg_char_rate,
         is_excited=record.is_excited,
         created_at=record.created_at,
         updated_at=record.updated_at,
@@ -139,6 +140,22 @@ async def upload_voice_message(
         transcript_text=(transcript_text or "").strip() or None,
         waveform=waveform_payload,
     )
+    if not created.transcript_text:
+        try:
+            result = transcribe_uploaded_audio(created.audio_path)
+            created = await voice_message.update_voice_message_transcript(
+                db,
+                created.id,
+                transcript_text=result["text"] or None,
+            ) or created
+        except Exception as exc:
+            logger.warning(
+                "voice_message_auto_transcribe_failed id=%s path=%s format=%s detail=%s",
+                created.id,
+                created.audio_path,
+                created.audio_format,
+                exc,
+            )
     try:
         await analyze_and_persist_voice_message_excitement(
             db,
@@ -156,22 +173,6 @@ async def upload_voice_message(
             created.audio_format,
             exc,
         )
-    if not created.transcript_text:
-        try:
-            result = transcribe_uploaded_audio(created.audio_path)
-            created = await voice_message.update_voice_message_transcript(
-                db,
-                created.id,
-                transcript_text=result["text"] or None,
-            ) or created
-        except Exception as exc:
-            logger.warning(
-                "voice_message_auto_transcribe_failed id=%s path=%s format=%s detail=%s",
-                created.id,
-                created.audio_path,
-                created.audio_format,
-                exc,
-            )
     return success_response(
         message="Voice message uploaded",
         data=_build_voice_message_info(created, user),
@@ -250,6 +251,24 @@ async def transcribe_voice_message(
     )
     if not updated:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Voice message does not exist")
+
+    try:
+        await analyze_and_persist_voice_message_excitement(
+            db,
+            voice_message_id=updated.id,
+            channel_id=updated.channel_id,
+            user_id=updated.user_id,
+            relative_audio_path=updated.audio_path,
+        )
+        updated = await voice_message.select_voice_message_by_id(db, updated.id) or updated
+    except Exception as exc:
+        logger.warning(
+            "voice_message_excitement_reanalysis_failed id=%s path=%s format=%s detail=%s",
+            updated.id,
+            updated.audio_path,
+            updated.audio_format,
+            exc,
+        )
 
     sender = await _get_sender(db, updated.user_id)
     return success_response(

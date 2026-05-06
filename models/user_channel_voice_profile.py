@@ -22,13 +22,25 @@ class UserChannelVoiceProfile(Base):
         DOUBLE,
         default=0,
         nullable=False,
-        comment="Historical average of sentence average amplitudes",
+        comment="Historical average of sentence average absolute amplitudes",
     )
     historical_avg_frequency: Mapped[float] = mapped_column(
         DOUBLE,
         default=0,
         nullable=False,
-        comment="Historical average of sentence average frequencies",
+        comment="Historical average of sentence envelope peak rates per second",
+    )
+    historical_avg_char_rate: Mapped[float] = mapped_column(
+        DOUBLE,
+        default=0,
+        nullable=False,
+        comment="Historical average of transcript characters per second",
+    )
+    char_rate_sample_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="Number of transcript-backed samples used for char-rate baseline",
     )
     total_sentence_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, comment="Total spoken sentences")
     baseline_sentence_count: Mapped[int] = mapped_column(

@@ -32,6 +32,19 @@ class VoiceMessages(Base):
     file_size: Mapped[int] = mapped_column(BIGINT, default=0, comment="Audio file size in bytes")
     transcript_text: Mapped[str | None] = mapped_column(Text, nullable=True, comment="Optional transcript text")
     waveform: Mapped[list[int] | None] = mapped_column(JSON, nullable=True, comment="Waveform preview buckets")
-    avg_amplitude: Mapped[float | None] = mapped_column(DOUBLE, nullable=True, comment="Average amplitude from Hilbert transform")
-    avg_frequency: Mapped[float | None] = mapped_column(DOUBLE, nullable=True, comment="Average frequency from Hilbert transform")
+    avg_amplitude: Mapped[float | None] = mapped_column(
+        DOUBLE,
+        nullable=True,
+        comment="Average absolute amplitude of the utterance waveform",
+    )
+    avg_frequency: Mapped[float | None] = mapped_column(
+        DOUBLE,
+        nullable=True,
+        comment="Speech-rate proxy as envelope peak count per second",
+    )
+    avg_char_rate: Mapped[float | None] = mapped_column(
+        DOUBLE,
+        nullable=True,
+        comment="Speech-rate feature as transcript characters per second",
+    )
     is_excited: Mapped[bool] = mapped_column(BOOLEAN, default=False, comment="Whether the utterance is excited")
