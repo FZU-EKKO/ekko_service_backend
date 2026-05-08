@@ -34,6 +34,14 @@ class VoiceMessageUploadResponse(BaseModel):
     voice_message: VoiceMessageInfo
 
 
+class VoiceStreamChunkResponse(BaseModel):
+    stream_id: str
+    emitted_count: int
+    voice_messages: list[VoiceMessageInfo]
+    session_active: bool
+    buffered_ms: int
+
+
 class VoiceMessagePage(BaseModel):
     total: int
     voice_messages: list[VoiceMessageInfo]

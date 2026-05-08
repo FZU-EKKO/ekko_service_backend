@@ -1,5 +1,7 @@
+import io
 import json
 import logging
+import wave
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -11,11 +13,12 @@ from config.db_config import get_db
 from crud import channel, domain, voice_message
 from models.channel import ChannelType
 from models.users import Users
-from schemas.voice_message import VoiceMessageInfo, VoiceMessagePage, VoiceMessageUserInfo
+from schemas.voice_message import VoiceMessageInfo, VoiceMessagePage, VoiceMessageUserInfo, VoiceStreamChunkResponse
 from utils.auth import get_current_user
-from utils.file_storage import save_voice_message_upload
+from utils.file_storage import save_voice_message_bytes, save_voice_message_upload
 from utils.voice_message_excitement import analyze_and_persist_voice_message_excitement
 from utils.response import success_response
+from utils.voice_stream_segmenter import StreamSentence, voice_stream_segmenter
 from utils.voice_message_transcriber import transcribe_uploaded_audio
 
 
@@ -97,6 +100,93 @@ def _parse_waveform(raw_waveform: str | None) -> list[int] | None:
     return normalized
 
 
+def _pcm16le_to_wav_bytes(pcm_bytes: bytes, *, sample_rate: int) -> bytes:
+    with io.BytesIO() as output:
+        with wave.open(output, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(pcm_bytes)
+        return output.getvalue()
+
+
+def _build_waveform_from_pcm16le(pcm_bytes: bytes, *, bucket_count: int = 48) -> list[int]:
+    if not pcm_bytes:
+        return []
+    sample_count = len(pcm_bytes) // 2
+    if sample_count <= 0:
+        return []
+    bucket_size = max(1, sample_count // bucket_count)
+    waveform: list[int] = []
+    for start_sample in range(0, sample_count, bucket_size):
+        peak = 0
+        end_sample = min(sample_count, start_sample + bucket_size)
+        for sample_index in range(start_sample, end_sample):
+            offset = sample_index * 2
+            sample = int.from_bytes(pcm_bytes[offset:offset + 2], byteorder="little", signed=True)
+            peak = max(peak, abs(sample))
+        waveform.append(max(0, min(100, round((peak / 32768.0) * 100))))
+        if len(waveform) >= bucket_count:
+            break
+    return waveform
+
+
+async def _persist_stream_sentence(
+    *,
+    db: AsyncSession,
+    user: Users,
+    channel_id: int,
+    sentence: StreamSentence,
+    client_message_id: str,
+):
+    wav_bytes = _pcm16le_to_wav_bytes(sentence.pcm_bytes, sample_rate=16000)
+    saved = save_voice_message_bytes(wav_bytes, channel_id=channel_id, suffix=".wav", mime_type="audio/wav")
+    created = await voice_message.create_voice_message(
+        db,
+        channel_id=channel_id,
+        user_id=user.id,
+        client_message_id=client_message_id,
+        audio_path=saved["path"],
+        audio_duration_ms=sentence.speech_ms,
+        audio_format=saved["audio_format"],
+        mime_type=saved["mime_type"],
+        file_size=saved["file_size"],
+        waveform=_build_waveform_from_pcm16le(sentence.pcm_bytes),
+    )
+    if not created.transcript_text:
+        try:
+            result = transcribe_uploaded_audio(created.audio_path)
+            created = await voice_message.update_voice_message_transcript(
+                db,
+                created.id,
+                transcript_text=result["text"] or None,
+            ) or created
+        except Exception as exc:
+            logger.warning(
+                "voice_stream_auto_transcribe_failed id=%s path=%s detail=%s",
+                created.id,
+                created.audio_path,
+                exc,
+            )
+    try:
+        await analyze_and_persist_voice_message_excitement(
+            db,
+            voice_message_id=created.id,
+            channel_id=created.channel_id,
+            user_id=created.user_id,
+            relative_audio_path=created.audio_path,
+        )
+        created = await voice_message.select_voice_message_by_id(db, created.id) or created
+    except Exception as exc:
+        logger.warning(
+            "voice_stream_excitement_analysis_failed id=%s path=%s detail=%s",
+            created.id,
+            created.audio_path,
+            exc,
+        )
+    return _build_voice_message_info(created, user)
+
+
 @ekko.post("/upload")
 async def upload_voice_message(
     channel_id: Annotated[int, Form(...)],
@@ -176,6 +266,68 @@ async def upload_voice_message(
     return success_response(
         message="Voice message uploaded",
         data=_build_voice_message_info(created, user),
+    )
+
+
+@ekko.post("/stream/chunk")
+async def upload_voice_stream_chunk(
+    channel_id: Annotated[int, Form(...)],
+    stream_id: Annotated[str, Form(...)],
+    sequence: Annotated[int, Form(...)],
+    file: Annotated[UploadFile, File(...)],
+    is_final: Annotated[bool, Form()] = False,
+    user: Users = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _assert_channel_access(db, channel_id=channel_id, user_id=user.id)
+    suffix = (file.filename or "").lower()
+    if not suffix.endswith(".wav"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Streaming chunks must be wav")
+
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Uploaded audio file is empty")
+
+    try:
+        with wave.open(io.BytesIO(payload), "rb") as wav_file:
+            if wav_file.getnchannels() != 1 or wav_file.getsampwidth() != 2 or wav_file.getframerate() != 16000:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Streaming chunks must be mono 16-bit 16kHz wav",
+                )
+            pcm_bytes = wav_file.readframes(wav_file.getnframes())
+    except wave.Error as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Streaming chunk is not a valid wav file") from exc
+
+    session_key = f"{user.id}:{channel_id}:{stream_id}"
+    emitted, session_active, buffered_ms = await voice_stream_segmenter.ingest(
+        session_key=session_key,
+        pcm_bytes=pcm_bytes,
+        is_final=is_final,
+    )
+
+    emitted_messages: list[VoiceMessageInfo] = []
+    for index, sentence in enumerate(emitted):
+        client_message_id = f"{stream_id}-{sequence}-{index}"
+        emitted_messages.append(
+            await _persist_stream_sentence(
+                db=db,
+                user=user,
+                channel_id=channel_id,
+                sentence=sentence,
+                client_message_id=client_message_id,
+            )
+        )
+
+    return success_response(
+        message="Voice stream chunk processed",
+        data=VoiceStreamChunkResponse(
+            stream_id=stream_id,
+            emitted_count=len(emitted_messages),
+            voice_messages=emitted_messages,
+            session_active=session_active,
+            buffered_ms=buffered_ms,
+        ),
     )
 
 

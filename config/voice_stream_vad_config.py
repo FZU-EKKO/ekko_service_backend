@@ -1,0 +1,10 @@
+from config.env import get_int_env
+
+
+STREAM_VAD_SAMPLE_RATE = get_int_env("EKKO_STREAM_VAD_SAMPLE_RATE", default=16000)
+STREAM_VAD_FRAME_MS = get_int_env("EKKO_STREAM_VAD_FRAME_MS", default=20)
+STREAM_VAD_MODE = get_int_env("EKKO_STREAM_VAD_MODE", default=2)
+STREAM_VAD_START_FRAMES = get_int_env("EKKO_STREAM_VAD_START_FRAMES", default=3)
+STREAM_VAD_END_SILENCE_MS = get_int_env("EKKO_STREAM_VAD_END_SILENCE_MS", default=600)
+STREAM_VAD_PRE_SPEECH_MS = get_int_env("EKKO_STREAM_VAD_PRE_SPEECH_MS", default=200)
+STREAM_VAD_MIN_SPEECH_MS = get_int_env("EKKO_STREAM_VAD_MIN_SPEECH_MS", default=350)

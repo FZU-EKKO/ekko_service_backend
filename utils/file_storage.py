@@ -100,6 +100,38 @@ async def save_voice_message_upload(file: UploadFile, *, channel_id: int) -> dic
     }
 
 
+def save_voice_message_bytes(
+    payload: bytes,
+    *,
+    channel_id: int,
+    suffix: str = ".wav",
+    mime_type: str = "audio/wav",
+) -> dict:
+    ensure_upload_dirs()
+
+    normalized_suffix = suffix if suffix.startswith(".") else f".{suffix}"
+    if normalized_suffix.lower() not in ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Unsupported audio extension")
+    if not payload:
+        raise HTTPException(status_code=400, detail="Uploaded audio file is empty")
+    if len(payload) > MAX_AUDIO_SIZE_BYTES:
+        raise HTTPException(status_code=400, detail="Audio file is too large")
+
+    target_dir = VOICE_MESSAGE_UPLOAD_ROOT / str(channel_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"{uuid.uuid4().hex}{normalized_suffix.lower()}"
+    save_path = target_dir / filename
+    save_path.write_bytes(payload)
+
+    return {
+        "path": f"/uploads/voice_messages/{channel_id}/{filename}",
+        "file_size": len(payload),
+        "audio_format": normalized_suffix.lower().lstrip("."),
+        "mime_type": mime_type,
+    }
+
+
 def delete_uploaded_file(relative_path: str | None) -> None:
     if not relative_path or not relative_path.startswith("/uploads/"):
         return
