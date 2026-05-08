@@ -2,6 +2,7 @@ import io
 import json
 import logging
 import wave
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -9,21 +10,81 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
-from config.db_config import get_db
+from config.db_config import AsyncSessionLocal, get_db
 from crud import channel, domain, voice_message
 from models.channel import ChannelType
 from models.users import Users
 from schemas.voice_message import VoiceMessageInfo, VoiceMessagePage, VoiceMessageUserInfo, VoiceStreamChunkResponse
 from utils.auth import get_current_user
-from utils.file_storage import save_voice_message_bytes, save_voice_message_upload
+from utils.audio_event_classifier import classify_audio_event_bytes, should_drop_audio_event
+from utils.file_storage import save_voice_message_bytes
 from utils.voice_message_excitement import analyze_and_persist_voice_message_excitement
 from utils.response import success_response
-from utils.voice_stream_segmenter import StreamSentence, voice_stream_segmenter
+from utils.voice_stream_segmenter import ExpiredStreamEmission, StreamSentence, voice_stream_segmenter
 from utils.voice_message_transcriber import transcribe_uploaded_audio
 
 
 ekko = APIRouter(prefix="/api/voice-messages", tags=["voice_messages"])
 logger = logging.getLogger("ekko.voice_messages")
+
+
+def _summarize_audio_event(classification: dict | None) -> str:
+    if not classification:
+        return "audio_event=disabled"
+
+    top_labels = classification.get("top_labels")
+    if isinstance(top_labels, list):
+        top_summary = ",".join(
+            f"{item.get('label')}:{float(item.get('score') or 0.0):.3f}"
+            for item in top_labels[:3]
+            if isinstance(item, dict)
+        )
+    else:
+        top_summary = ""
+
+    return (
+        "audio_event="
+        f"dominant={classification.get('dominant_label')} "
+        f"is_speech={bool(classification.get('is_speech'))} "
+        f"should_drop={bool(classification.get('should_drop'))} "
+        f"speech={float(classification.get('speech_score') or 0.0):.4f} "
+        f"breathing={float(classification.get('breathing_score') or 0.0):.4f} "
+        f"noise={float(classification.get('noise_score') or 0.0):.4f} "
+        f"top=[{top_summary}]"
+    )
+
+
+def _classify_sentence_wav_bytes(
+    *,
+    wav_bytes: bytes,
+    channel_id: int,
+    user_id: str,
+    speech_ms: int,
+    log_prefix: str,
+) -> tuple[bool, dict | None]:
+    classification = None
+    try:
+        classification = classify_audio_event_bytes(wav_bytes, audio_format="wav")
+    except Exception as exc:
+        logger.warning(
+            "%s_audio_event_classify_failed channel_id=%s user_id=%s detail=%s",
+            log_prefix,
+            channel_id,
+            user_id,
+            exc,
+        )
+
+    dropped = should_drop_audio_event(classification)
+    logger.info(
+        "%s_%s channel_id=%s user_id=%s speech_ms=%s %s",
+        log_prefix,
+        "dropped_by_audio_event" if dropped else "allowed_by_audio_event",
+        channel_id,
+        user_id,
+        speech_ms,
+        _summarize_audio_event(classification),
+    )
+    return dropped, classification
 
 
 async def _assert_channel_access(db: AsyncSession, *, channel_id: int, user_id: str):
@@ -140,6 +201,16 @@ async def _persist_stream_sentence(
     client_message_id: str,
 ):
     wav_bytes = _pcm16le_to_wav_bytes(sentence.pcm_bytes, sample_rate=16000)
+    dropped, _classification = _classify_sentence_wav_bytes(
+        wav_bytes=wav_bytes,
+        channel_id=channel_id,
+        user_id=user.id,
+        speech_ms=sentence.speech_ms,
+        log_prefix="voice_stream_sentence",
+    )
+    if dropped:
+        return None
+
     saved = save_voice_message_bytes(wav_bytes, channel_id=channel_id, suffix=".wav", mime_type="audio/wav")
     created = await voice_message.create_voice_message(
         db,
@@ -187,6 +258,24 @@ async def _persist_stream_sentence(
     return _build_voice_message_info(created, user)
 
 
+async def persist_expired_stream_emission(emission: ExpiredStreamEmission) -> list[VoiceMessageInfo]:
+    async with AsyncSessionLocal() as db:
+        sender = await _get_sender(db, emission.user_id)
+        emitted_messages: list[VoiceMessageInfo] = []
+        for index, sentence in enumerate(emission.sentences):
+            client_message_id = f"{emission.stream_id}-timeout-{emission.next_sequence + index}"
+            persisted = await _persist_stream_sentence(
+                db=db,
+                user=sender,
+                channel_id=emission.channel_id,
+                sentence=sentence,
+                client_message_id=client_message_id,
+            )
+            if persisted is not None:
+                emitted_messages.append(persisted)
+        return emitted_messages
+
+
 @ekko.post("/upload")
 async def upload_voice_message(
     channel_id: Annotated[int, Form(...)],
@@ -216,7 +305,34 @@ async def upload_voice_message(
         return success_response(message="Voice message already uploaded", data=info)
 
     waveform_payload = _parse_waveform(waveform)
-    saved = await save_voice_message_upload(file, channel_id=channel_id)
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix != ".wav":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Unsupported audio extension")
+
+    normalized_content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if normalized_content_type not in {"audio/wav", "audio/wave", "audio/x-wav"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Unsupported audio content type")
+
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Uploaded audio file is empty")
+
+    dropped, _classification = _classify_sentence_wav_bytes(
+        wav_bytes=payload,
+        channel_id=channel_id,
+        user_id=user.id,
+        speech_ms=duration_ms,
+        log_prefix="voice_message_upload",
+    )
+    if dropped:
+        return success_response(message="Voice message dropped by audio event filter", data=None)
+
+    saved = save_voice_message_bytes(
+        payload,
+        channel_id=channel_id,
+        suffix=suffix,
+        mime_type=normalized_content_type or file.content_type or "audio/wav",
+    )
     created = await voice_message.create_voice_message(
         db,
         channel_id=channel_id,
@@ -302,6 +418,9 @@ async def upload_voice_stream_chunk(
     session_key = f"{user.id}:{channel_id}:{stream_id}"
     emitted, session_active, buffered_ms = await voice_stream_segmenter.ingest(
         session_key=session_key,
+        user_id=user.id,
+        channel_id=channel_id,
+        stream_id=stream_id,
         pcm_bytes=pcm_bytes,
         is_final=is_final,
     )
@@ -309,15 +428,15 @@ async def upload_voice_stream_chunk(
     emitted_messages: list[VoiceMessageInfo] = []
     for index, sentence in enumerate(emitted):
         client_message_id = f"{stream_id}-{sequence}-{index}"
-        emitted_messages.append(
-            await _persist_stream_sentence(
-                db=db,
-                user=user,
-                channel_id=channel_id,
-                sentence=sentence,
-                client_message_id=client_message_id,
-            )
+        persisted = await _persist_stream_sentence(
+            db=db,
+            user=user,
+            channel_id=channel_id,
+            sentence=sentence,
+            client_message_id=client_message_id,
         )
+        if persisted is not None:
+            emitted_messages.append(persisted)
 
     return success_response(
         message="Voice stream chunk processed",

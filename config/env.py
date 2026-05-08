@@ -21,6 +21,13 @@ def get_int_env(*names: str, default: int) -> int:
     return int(value)
 
 
+def get_float_env(*names: str, default: float) -> float:
+    value = get_env(*names, default=None)
+    if value is None:
+        return default
+    return float(value)
+
+
 def get_bool_env(*names: str, default: bool = False) -> bool:
     value = get_env(*names, default=None)
     if value is None:
