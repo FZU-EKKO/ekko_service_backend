@@ -1,7 +1,5 @@
-import io
 import json
 import logging
-import wave
 from pathlib import Path
 from typing import Annotated
 
@@ -10,22 +8,22 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
-from config.db_config import AsyncSessionLocal, get_db
+from config.db_config import get_db
 from crud import channel, domain, voice_message
 from models.channel import ChannelType
 from models.users import Users
-from schemas.voice_message import VoiceMessageInfo, VoiceMessagePage, VoiceMessageUserInfo, VoiceStreamChunkResponse
+from schemas.voice_message import VoiceMessageInfo, VoiceMessagePage, VoiceMessageUserInfo
 from utils.auth import get_current_user
 from utils.audio_event_classifier import classify_audio_event_bytes, should_drop_audio_event
 from utils.file_storage import save_voice_message_bytes
 from utils.voice_message_excitement import analyze_and_persist_voice_message_excitement
 from utils.response import success_response
-from utils.voice_stream_segmenter import ExpiredStreamEmission, StreamSentence, voice_stream_segmenter
-from utils.voice_message_transcriber import transcribe_uploaded_audio
+from utils.voice_message_transcriber import transcribe_audio_bytes, transcribe_uploaded_audio
 
 
 ekko = APIRouter(prefix="/api/voice-messages", tags=["voice_messages"])
 logger = logging.getLogger("ekko.voice_messages")
+UNRECOGNIZED_SPEECH_TEXT = "[unrecognized speech]"
 
 
 def _summarize_audio_event(classification: dict | None) -> str:
@@ -161,119 +159,14 @@ def _parse_waveform(raw_waveform: str | None) -> list[int] | None:
     return normalized
 
 
-def _pcm16le_to_wav_bytes(pcm_bytes: bytes, *, sample_rate: int) -> bytes:
-    with io.BytesIO() as output:
-        with wave.open(output, "wb") as wav_file:
-            wav_file.setnchannels(1)
-            wav_file.setsampwidth(2)
-            wav_file.setframerate(sample_rate)
-            wav_file.writeframes(pcm_bytes)
-        return output.getvalue()
+def _normalize_transcript_text(transcript_text: str | None) -> str | None:
+    normalized = (transcript_text or "").strip()
+    return normalized or None
 
 
-def _build_waveform_from_pcm16le(pcm_bytes: bytes, *, bucket_count: int = 48) -> list[int]:
-    if not pcm_bytes:
-        return []
-    sample_count = len(pcm_bytes) // 2
-    if sample_count <= 0:
-        return []
-    bucket_size = max(1, sample_count // bucket_count)
-    waveform: list[int] = []
-    for start_sample in range(0, sample_count, bucket_size):
-        peak = 0
-        end_sample = min(sample_count, start_sample + bucket_size)
-        for sample_index in range(start_sample, end_sample):
-            offset = sample_index * 2
-            sample = int.from_bytes(pcm_bytes[offset:offset + 2], byteorder="little", signed=True)
-            peak = max(peak, abs(sample))
-        waveform.append(max(0, min(100, round((peak / 32768.0) * 100))))
-        if len(waveform) >= bucket_count:
-            break
-    return waveform
-
-
-async def _persist_stream_sentence(
-    *,
-    db: AsyncSession,
-    user: Users,
-    channel_id: int,
-    sentence: StreamSentence,
-    client_message_id: str,
-):
-    wav_bytes = _pcm16le_to_wav_bytes(sentence.pcm_bytes, sample_rate=16000)
-    dropped, _classification = _classify_sentence_wav_bytes(
-        wav_bytes=wav_bytes,
-        channel_id=channel_id,
-        user_id=user.id,
-        speech_ms=sentence.speech_ms,
-        log_prefix="voice_stream_sentence",
-    )
-    if dropped:
-        return None
-
-    saved = save_voice_message_bytes(wav_bytes, channel_id=channel_id, suffix=".wav", mime_type="audio/wav")
-    created = await voice_message.create_voice_message(
-        db,
-        channel_id=channel_id,
-        user_id=user.id,
-        client_message_id=client_message_id,
-        audio_path=saved["path"],
-        audio_duration_ms=sentence.speech_ms,
-        audio_format=saved["audio_format"],
-        mime_type=saved["mime_type"],
-        file_size=saved["file_size"],
-        waveform=_build_waveform_from_pcm16le(sentence.pcm_bytes),
-    )
-    if not created.transcript_text:
-        try:
-            result = transcribe_uploaded_audio(created.audio_path)
-            created = await voice_message.update_voice_message_transcript(
-                db,
-                created.id,
-                transcript_text=result["text"] or None,
-            ) or created
-        except Exception as exc:
-            logger.warning(
-                "voice_stream_auto_transcribe_failed id=%s path=%s detail=%s",
-                created.id,
-                created.audio_path,
-                exc,
-            )
-    try:
-        await analyze_and_persist_voice_message_excitement(
-            db,
-            voice_message_id=created.id,
-            channel_id=created.channel_id,
-            user_id=created.user_id,
-            relative_audio_path=created.audio_path,
-        )
-        created = await voice_message.select_voice_message_by_id(db, created.id) or created
-    except Exception as exc:
-        logger.warning(
-            "voice_stream_excitement_analysis_failed id=%s path=%s detail=%s",
-            created.id,
-            created.audio_path,
-            exc,
-        )
-    return _build_voice_message_info(created, user)
-
-
-async def persist_expired_stream_emission(emission: ExpiredStreamEmission) -> list[VoiceMessageInfo]:
-    async with AsyncSessionLocal() as db:
-        sender = await _get_sender(db, emission.user_id)
-        emitted_messages: list[VoiceMessageInfo] = []
-        for index, sentence in enumerate(emission.sentences):
-            client_message_id = f"{emission.stream_id}-timeout-{emission.next_sequence + index}"
-            persisted = await _persist_stream_sentence(
-                db=db,
-                user=sender,
-                channel_id=emission.channel_id,
-                sentence=sentence,
-                client_message_id=client_message_id,
-            )
-            if persisted is not None:
-                emitted_messages.append(persisted)
-        return emitted_messages
+def _is_unrecognized_speech(transcript_text: str | None) -> bool:
+    normalized = _normalize_transcript_text(transcript_text)
+    return bool(normalized and normalized.casefold() == UNRECOGNIZED_SPEECH_TEXT.casefold())
 
 
 @ekko.post("/upload")
@@ -327,6 +220,26 @@ async def upload_voice_message(
     if dropped:
         return success_response(message="Voice message dropped by audio event filter", data=None)
 
+    transcript_value = _normalize_transcript_text(transcript_text)
+    if transcript_value is None:
+        try:
+            result = transcribe_audio_bytes(
+                audio_bytes=payload,
+                audio_format=suffix.lstrip("."),
+                source_label=f"upload:{channel_id}:{client_message_id or 'anonymous'}",
+            )
+            transcript_value = _normalize_transcript_text(result.get("text"))
+        except Exception as exc:
+            logger.warning(
+                "voice_message_auto_transcribe_failed channel_id=%s user_id=%s client_message_id=%s detail=%s",
+                channel_id,
+                user.id,
+                client_message_id,
+                exc,
+            )
+    if _is_unrecognized_speech(transcript_value):
+        return success_response(message="Voice message dropped because transcript is unrecognized", data=None)
+
     saved = save_voice_message_bytes(
         payload,
         channel_id=channel_id,
@@ -343,112 +256,31 @@ async def upload_voice_message(
         audio_format=saved["audio_format"],
         mime_type=saved["mime_type"],
         file_size=saved["file_size"],
-        transcript_text=(transcript_text or "").strip() or None,
+        transcript_text=transcript_value,
         waveform=waveform_payload,
     )
-    if not created.transcript_text:
+    if created.transcript_text and not _is_unrecognized_speech(created.transcript_text):
         try:
-            result = transcribe_uploaded_audio(created.audio_path)
-            created = await voice_message.update_voice_message_transcript(
+            await analyze_and_persist_voice_message_excitement(
                 db,
-                created.id,
-                transcript_text=result["text"] or None,
-            ) or created
+                voice_message_id=created.id,
+                channel_id=created.channel_id,
+                user_id=created.user_id,
+                relative_audio_path=created.audio_path,
+            )
+            created = await voice_message.select_voice_message_by_id(db, created.id) or created
         except Exception as exc:
             logger.warning(
-                "voice_message_auto_transcribe_failed id=%s path=%s format=%s detail=%s",
+                "voice_message_excitement_analysis_failed id=%s path=%s format=%s detail=%s",
                 created.id,
                 created.audio_path,
                 created.audio_format,
                 exc,
             )
-    try:
-        await analyze_and_persist_voice_message_excitement(
-            db,
-            voice_message_id=created.id,
-            channel_id=created.channel_id,
-            user_id=created.user_id,
-            relative_audio_path=created.audio_path,
-        )
-        created = await voice_message.select_voice_message_by_id(db, created.id) or created
-    except Exception as exc:
-        logger.warning(
-            "voice_message_excitement_analysis_failed id=%s path=%s format=%s detail=%s",
-            created.id,
-            created.audio_path,
-            created.audio_format,
-            exc,
-        )
     return success_response(
         message="Voice message uploaded",
         data=_build_voice_message_info(created, user),
     )
-
-
-@ekko.post("/stream/chunk")
-async def upload_voice_stream_chunk(
-    channel_id: Annotated[int, Form(...)],
-    stream_id: Annotated[str, Form(...)],
-    sequence: Annotated[int, Form(...)],
-    file: Annotated[UploadFile, File(...)],
-    is_final: Annotated[bool, Form()] = False,
-    user: Users = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    await _assert_channel_access(db, channel_id=channel_id, user_id=user.id)
-    suffix = (file.filename or "").lower()
-    if not suffix.endswith(".wav"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Streaming chunks must be wav")
-
-    payload = await file.read()
-    if not payload:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Uploaded audio file is empty")
-
-    try:
-        with wave.open(io.BytesIO(payload), "rb") as wav_file:
-            if wav_file.getnchannels() != 1 or wav_file.getsampwidth() != 2 or wav_file.getframerate() != 16000:
-                raise HTTPException(
-                    status.HTTP_400_BAD_REQUEST,
-                    detail="Streaming chunks must be mono 16-bit 16kHz wav",
-                )
-            pcm_bytes = wav_file.readframes(wav_file.getnframes())
-    except wave.Error as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Streaming chunk is not a valid wav file") from exc
-
-    session_key = f"{user.id}:{channel_id}:{stream_id}"
-    emitted, session_active, buffered_ms = await voice_stream_segmenter.ingest(
-        session_key=session_key,
-        user_id=user.id,
-        channel_id=channel_id,
-        stream_id=stream_id,
-        pcm_bytes=pcm_bytes,
-        is_final=is_final,
-    )
-
-    emitted_messages: list[VoiceMessageInfo] = []
-    for index, sentence in enumerate(emitted):
-        client_message_id = f"{stream_id}-{sequence}-{index}"
-        persisted = await _persist_stream_sentence(
-            db=db,
-            user=user,
-            channel_id=channel_id,
-            sentence=sentence,
-            client_message_id=client_message_id,
-        )
-        if persisted is not None:
-            emitted_messages.append(persisted)
-
-    return success_response(
-        message="Voice stream chunk processed",
-        data=VoiceStreamChunkResponse(
-            stream_id=stream_id,
-            emitted_count=len(emitted_messages),
-            voice_messages=emitted_messages,
-            session_active=session_active,
-            buffered_ms=buffered_ms,
-        ),
-    )
-
 
 @ekko.get("/channel/{channel_id}")
 async def list_voice_messages_by_channel(

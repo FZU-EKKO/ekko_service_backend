@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 from scipy.signal import find_peaks, hilbert, resample_poly
 
+from config.voice_message_analysis_config import (
+    VOICE_MESSAGE_EXCITEMENT_AMPLITUDE_WEIGHT,
+    VOICE_MESSAGE_EXCITEMENT_CHAR_RATE_WEIGHT,
+    VOICE_MESSAGE_EXCITEMENT_PEAK_RATE_WEIGHT,
+)
 from crud import voice_message
 from utils.voice_message_transcriber import resolve_uploaded_audio_path
 
@@ -17,9 +22,6 @@ MIN_COMPOSITE_METRICS = 2
 MAX_BASELINE_SENTENCES = 500
 METRIC_FULL_SCORE_RATIO = 1.8
 COMPOSITE_EXCITEMENT_THRESHOLD = 0.68
-AMPLITUDE_WEIGHT = 0.35
-PEAK_RATE_WEIGHT = 0.25
-CHAR_RATE_WEIGHT = 0.40
 PEAK_SMOOTHING_WINDOW_MS = 40
 PEAK_MIN_DISTANCE_MS = 120
 
@@ -129,9 +131,9 @@ def _composite_excitation_score(
     char_rate_score: float | None,
 ) -> tuple[float, int]:
     weighted_scores = [
-        (amplitude_score, AMPLITUDE_WEIGHT),
-        (peak_rate_score, PEAK_RATE_WEIGHT),
-        (char_rate_score, CHAR_RATE_WEIGHT),
+        (amplitude_score, VOICE_MESSAGE_EXCITEMENT_AMPLITUDE_WEIGHT),
+        (peak_rate_score, VOICE_MESSAGE_EXCITEMENT_PEAK_RATE_WEIGHT),
+        (char_rate_score, VOICE_MESSAGE_EXCITEMENT_CHAR_RATE_WEIGHT),
     ]
     available = [(score, weight) for score, weight in weighted_scores if score is not None]
     if not available:

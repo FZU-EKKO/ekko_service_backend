@@ -56,13 +56,9 @@ def should_bypass_proxy(url: str) -> bool:
         return False
 
 
-def transcribe_uploaded_audio(relative_path: str) -> dict:
+def _transcribe_audio_bytes(*, audio_bytes: bytes, audio_format: str, source_label: str) -> dict:
     if not VOICE_MESSAGE_ASR_REMOTE_URL:
         raise ValueError("EKKO_ASR_REMOTE_URL is not configured")
-
-    resolved_path = resolve_uploaded_audio_path(relative_path)
-    audio_format = resolve_audio_format(resolved_path)
-    audio_bytes = resolved_path.read_bytes()
     if not audio_bytes:
         raise ValueError("Uploaded audio file is empty")
 
@@ -87,10 +83,9 @@ def transcribe_uploaded_audio(relative_path: str) -> dict:
     )
 
     logger.info(
-        "voice_message_transcribe request url=%s relative_path=%s resolved_path=%s format=%s bytes=%s",
+        "voice_message_transcribe request url=%s source=%s format=%s bytes=%s",
         VOICE_MESSAGE_ASR_REMOTE_URL,
-        relative_path,
-        resolved_path,
+        source_label,
         audio_format,
         len(audio_bytes),
     )
@@ -103,19 +98,18 @@ def transcribe_uploaded_audio(relative_path: str) -> dict:
     except HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="ignore")
         logger.error(
-            "voice_message_transcribe http_error url=%s path=%s status=%s body=%s",
+            "voice_message_transcribe http_error url=%s source=%s status=%s body=%s",
             VOICE_MESSAGE_ASR_REMOTE_URL,
-            relative_path,
+            source_label,
             exc.code,
             error_body,
         )
         raise RuntimeError(f"ASR HTTP {exc.code}: {error_body}") from exc
     except URLError as exc:
         logger.error(
-            "voice_message_transcribe connection_failed url=%s relative_path=%s resolved_path=%s format=%s reason=%s",
+            "voice_message_transcribe connection_failed url=%s source=%s format=%s reason=%s",
             VOICE_MESSAGE_ASR_REMOTE_URL,
-            relative_path,
-            resolved_path,
+            source_label,
             audio_format,
             exc.reason,
         )
@@ -125,10 +119,9 @@ def transcribe_uploaded_audio(relative_path: str) -> dict:
         data = json.loads(body)
     except json.JSONDecodeError as exc:
         logger.error(
-            "voice_message_transcribe invalid_json_response url=%s relative_path=%s resolved_path=%s format=%s body=%s",
+            "voice_message_transcribe invalid_json_response url=%s source=%s format=%s body=%s",
             VOICE_MESSAGE_ASR_REMOTE_URL,
-            relative_path,
-            resolved_path,
+            source_label,
             audio_format,
             body,
         )
@@ -136,9 +129,8 @@ def transcribe_uploaded_audio(relative_path: str) -> dict:
 
     text = str(data.get("text", "")).strip()
     logger.info(
-        "voice_message_transcribe success relative_path=%s resolved_path=%s format=%s text_chars=%s",
-        relative_path,
-        resolved_path,
+        "voice_message_transcribe success source=%s format=%s text_chars=%s",
+        source_label,
         audio_format,
         len(text),
     )
@@ -146,3 +138,18 @@ def transcribe_uploaded_audio(relative_path: str) -> dict:
         "text": text,
         "words": data.get("words") if isinstance(data.get("words"), list) else None,
     }
+
+
+def transcribe_audio_bytes(*, audio_bytes: bytes, audio_format: str, source_label: str = "memory") -> dict:
+    return _transcribe_audio_bytes(audio_bytes=audio_bytes, audio_format=audio_format, source_label=source_label)
+
+
+def transcribe_uploaded_audio(relative_path: str) -> dict:
+    resolved_path = resolve_uploaded_audio_path(relative_path)
+    audio_format = resolve_audio_format(resolved_path)
+    audio_bytes = resolved_path.read_bytes()
+    return _transcribe_audio_bytes(
+        audio_bytes=audio_bytes,
+        audio_format=audio_format,
+        source_label=f"{relative_path} -> {resolved_path}",
+    )

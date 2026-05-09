@@ -1,0 +1,15 @@
+from config.env import get_float_env
+
+
+VOICE_MESSAGE_EXCITEMENT_AMPLITUDE_WEIGHT = get_float_env(
+    "EKKO_VOICE_EXCITEMENT_AMPLITUDE_WEIGHT",
+    default=0.5,
+)
+VOICE_MESSAGE_EXCITEMENT_CHAR_RATE_WEIGHT = get_float_env(
+    "EKKO_VOICE_EXCITEMENT_CHAR_RATE_WEIGHT",
+    default=0.3,
+)
+VOICE_MESSAGE_EXCITEMENT_PEAK_RATE_WEIGHT = get_float_env(
+    "EKKO_VOICE_EXCITEMENT_PEAK_RATE_WEIGHT",
+    default=0.2,
+)
