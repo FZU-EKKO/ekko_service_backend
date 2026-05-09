@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -94,6 +96,8 @@ async def select_transcript_voice_messages_by_channel(
     db: AsyncSession,
     channel_id: int,
     *,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
     limit: int | None = None,
 ):
     query = (
@@ -106,6 +110,10 @@ async def select_transcript_voice_messages_by_channel(
         )
         .order_by(VoiceMessages.created_at.desc(), VoiceMessages.id.desc())
     )
+    if start_time is not None:
+        query = query.where(VoiceMessages.created_at >= start_time)
+    if end_time is not None:
+        query = query.where(VoiceMessages.created_at <= end_time)
     if limit is not None:
         query = query.limit(limit)
     result = await db.execute(query)

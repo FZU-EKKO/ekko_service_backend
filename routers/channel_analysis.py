@@ -42,6 +42,8 @@ async def analyze_channel(
             db=db,
             channel_id=channel_id,
             prompt=req.prompt,
+            start_time=req.start_time,
+            end_time=req.end_time,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

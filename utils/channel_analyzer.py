@@ -126,14 +126,28 @@ def _call_remote_analysis_service(*, channel_id: int, conversation_text: str, pr
     return parsed
 
 
-async def analyze_channel_conversation(*, db, channel_id: int, prompt: str) -> dict:
+async def analyze_channel_conversation(
+    *,
+    db,
+    channel_id: int,
+    prompt: str,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+) -> dict:
+    if start_time and end_time and start_time > end_time:
+        raise ValueError("start_time must be earlier than or equal to end_time")
+
     rows = await voice_message.select_transcript_voice_messages_by_channel(
         db,
         channel_id,
+        start_time=start_time,
+        end_time=end_time,
         limit=CHANNEL_ANALYSIS_MAX_MESSAGES,
     )
     conversation_text, source_count, truncated = build_channel_conversation_text(rows)
     if not conversation_text:
+        if start_time or end_time:
+            raise ValueError("No transcript text is available for this channel in the selected time range")
         raise ValueError("No transcript text is available for this channel yet")
 
     result = _call_remote_analysis_service(
@@ -150,4 +164,6 @@ async def analyze_channel_conversation(*, db, channel_id: int, prompt: str) -> d
         "prompt": (prompt or "").strip(),
         "source_count": source_count,
         "truncated": bool(truncated or result.get("truncated", False)),
+        "start_time": start_time,
+        "end_time": end_time,
     }
