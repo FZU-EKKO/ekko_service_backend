@@ -13,39 +13,31 @@ class UserChannelVoiceProfile(Base):
         ForeignKeyConstraint(["channel_id"], [Channels.id], name="fk_voice_profile_channel"),
         ForeignKeyConstraint(["user_id"], [Users.id], name="fk_voice_profile_user"),
         Index("idx_voice_profile_user", "user_id"),
-        Index("idx_voice_profile_baseline_count", "baseline_sentence_count"),
     )
 
     channel_id: Mapped[int] = mapped_column(BIGINT, nullable=False, comment="Channel ID")
     user_id: Mapped[str] = mapped_column(CHAR(7), nullable=False, comment="User ID")
-    historical_avg_amplitude: Mapped[float] = mapped_column(
+    baseline_avg_amplitude: Mapped[float] = mapped_column(
         DOUBLE,
         default=0,
         nullable=False,
-        comment="Historical average of sentence average absolute amplitudes",
+        comment="Baseline average amplitude from the first N utterances",
     )
-    historical_avg_frequency: Mapped[float] = mapped_column(
+    baseline_avg_frequency: Mapped[float] = mapped_column(
         DOUBLE,
         default=0,
         nullable=False,
-        comment="Historical average of sentence envelope peak rates per second",
+        comment="Baseline average peak rate from the first N utterances",
     )
-    historical_avg_char_rate: Mapped[float] = mapped_column(
+    baseline_avg_char_rate: Mapped[float] = mapped_column(
         DOUBLE,
         default=0,
         nullable=False,
-        comment="Historical average of transcript characters per second",
+        comment="Baseline average transcript char rate from the first N utterances",
     )
-    char_rate_sample_count: Mapped[int] = mapped_column(
+    baseline_sample_count: Mapped[int] = mapped_column(
         Integer,
         default=0,
         nullable=False,
-        comment="Number of transcript-backed samples used for char-rate baseline",
-    )
-    total_sentence_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, comment="Total spoken sentences")
-    baseline_sentence_count: Mapped[int] = mapped_column(
-        Integer,
-        default=0,
-        nullable=False,
-        comment="Sentence count used in historical baseline, capped at 500",
+        comment="How many utterances have been folded into the baseline",
     )

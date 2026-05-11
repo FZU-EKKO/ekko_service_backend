@@ -1,4 +1,3 @@
-import json
 import logging
 from pathlib import Path
 from typing import Annotated
@@ -16,9 +15,16 @@ from schemas.voice_message import VoiceMessageInfo, VoiceMessagePage, VoiceMessa
 from utils.auth import get_current_user
 from utils.audio_event_classifier import classify_audio_event_bytes, should_drop_audio_event
 from utils.file_storage import save_voice_message_bytes
-from utils.voice_message_excitement import analyze_and_persist_voice_message_excitement
 from utils.response import success_response
-from utils.voice_message_transcriber import transcribe_audio_bytes, transcribe_uploaded_audio
+from utils.voice_message_excitement import analyze_and_persist_voice_message_excitement
+from utils.voice_message_transcription_queue import (
+    TRANSCRIPTION_DONE,
+    TRANSCRIPTION_DROPPED,
+    TRANSCRIPTION_FAILED,
+    TRANSCRIPTION_PENDING,
+    TRANSCRIPTION_PROCESSING,
+    enqueue_voice_message_transcription,
+)
 
 
 ekko = APIRouter(prefix="/api/voice-messages", tags=["voice_messages"])
@@ -121,15 +127,12 @@ def _build_voice_message_info(record, sender: Users) -> VoiceMessageInfo:
         client_message_id=record.client_message_id,
         audio_path=record.audio_path,
         audio_duration_ms=record.audio_duration_ms,
-        audio_format=record.audio_format,
-        mime_type=record.mime_type,
-        file_size=record.file_size,
         transcript_text=record.transcript_text,
-        waveform=record.waveform,
         avg_amplitude=record.avg_amplitude,
         avg_frequency=record.avg_frequency,
         avg_char_rate=record.avg_char_rate,
         is_excited=record.is_excited,
+        transcription_status=record.transcription_status,
         created_at=record.created_at,
         updated_at=record.updated_at,
         user=VoiceMessageUserInfo(
@@ -138,26 +141,6 @@ def _build_voice_message_info(record, sender: Users) -> VoiceMessageInfo:
             avatar=sender.avatar,
         ),
     )
-
-
-def _parse_waveform(raw_waveform: str | None) -> list[int] | None:
-    if not raw_waveform:
-        return None
-    try:
-        payload = json.loads(raw_waveform)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid waveform payload") from exc
-
-    if not isinstance(payload, list):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Waveform must be an array")
-
-    normalized: list[int] = []
-    for item in payload[:256]:
-        if not isinstance(item, int):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Waveform values must be integers")
-        normalized.append(max(0, min(100, item)))
-    return normalized
-
 
 def _normalize_transcript_text(transcript_text: str | None) -> str | None:
     normalized = (transcript_text or "").strip()
@@ -176,7 +159,6 @@ async def upload_voice_message(
     file: Annotated[UploadFile, File(...)],
     client_message_id: Annotated[str | None, Form()] = None,
     transcript_text: Annotated[str | None, Form()] = None,
-    waveform: Annotated[str | None, Form()] = None,
     user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -197,7 +179,6 @@ async def upload_voice_message(
         info = _build_voice_message_info(existing, user)
         return success_response(message="Voice message already uploaded", data=info)
 
-    waveform_payload = _parse_waveform(waveform)
     suffix = Path(file.filename or "").suffix.lower()
     if suffix != ".wav":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Unsupported audio extension")
@@ -221,22 +202,6 @@ async def upload_voice_message(
         return success_response(message="Voice message dropped by audio event filter", data=None)
 
     transcript_value = _normalize_transcript_text(transcript_text)
-    if transcript_value is None:
-        try:
-            result = transcribe_audio_bytes(
-                audio_bytes=payload,
-                audio_format=suffix.lstrip("."),
-                source_label=f"upload:{channel_id}:{client_message_id or 'anonymous'}",
-            )
-            transcript_value = _normalize_transcript_text(result.get("text"))
-        except Exception as exc:
-            logger.warning(
-                "voice_message_auto_transcribe_failed channel_id=%s user_id=%s client_message_id=%s detail=%s",
-                channel_id,
-                user.id,
-                client_message_id,
-                exc,
-            )
     if _is_unrecognized_speech(transcript_value):
         return success_response(message="Voice message dropped because transcript is unrecognized", data=None)
 
@@ -253,11 +218,8 @@ async def upload_voice_message(
         client_message_id=client_message_id,
         audio_path=saved["path"],
         audio_duration_ms=duration_ms,
-        audio_format=saved["audio_format"],
-        mime_type=saved["mime_type"],
-        file_size=saved["file_size"],
         transcript_text=transcript_value,
-        waveform=waveform_payload,
+        transcription_status=TRANSCRIPTION_DONE if transcript_value else TRANSCRIPTION_PENDING,
     )
     if created.transcript_text and not _is_unrecognized_speech(created.transcript_text):
         try:
@@ -271,11 +233,18 @@ async def upload_voice_message(
             created = await voice_message.select_voice_message_by_id(db, created.id) or created
         except Exception as exc:
             logger.warning(
-                "voice_message_excitement_analysis_failed id=%s path=%s format=%s detail=%s",
+                "voice_message_excitement_analysis_failed id=%s path=%s detail=%s",
                 created.id,
                 created.audio_path,
-                created.audio_format,
                 exc,
+            )
+    elif created.transcription_status == TRANSCRIPTION_PENDING:
+        queued = await enqueue_voice_message_transcription(created.id)
+        if not queued:
+            logger.warning(
+                "voice_message_transcription_enqueue_skipped id=%s status=%s",
+                created.id,
+                created.transcription_status,
             )
     return success_response(
         message="Voice message uploaded",
@@ -311,70 +280,28 @@ async def transcribe_voice_message(
     db: AsyncSession = Depends(get_db),
 ):
     record = await _assert_voice_message_access(db, voice_message_id=voice_message_id, user_id=user.id)
-    if record.transcript_text:
+    if record.transcription_status == TRANSCRIPTION_DONE and record.transcript_text:
         sender = await _get_sender(db, record.user_id)
         return success_response(
             message="Voice message transcript fetched",
             data=_build_voice_message_info(record, sender),
         )
-
-    try:
-        result = transcribe_uploaded_audio(record.audio_path)
-    except FileNotFoundError as exc:
-        logger.warning(
-            "voice_message_transcribe file_missing id=%s path=%s format=%s",
-            voice_message_id,
-            record.audio_path,
-            record.audio_format,
-        )
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ValueError as exc:
-        logger.warning(
-            "voice_message_transcribe bad_request id=%s path=%s format=%s detail=%s",
-            voice_message_id,
-            record.audio_path,
-            record.audio_format,
-            exc,
-        )
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        logger.exception(
-            "voice_message_transcribe upstream_failed id=%s path=%s format=%s detail=%s",
-            voice_message_id,
-            record.audio_path,
-            record.audio_format,
-            exc,
-        )
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-
-    updated = await voice_message.update_voice_message_transcript(
-        db,
-        voice_message_id,
-        transcript_text=result["text"] or None,
-    )
-    if not updated:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Voice message does not exist")
-
-    try:
-        await analyze_and_persist_voice_message_excitement(
+    if record.transcription_status in {TRANSCRIPTION_DROPPED, TRANSCRIPTION_FAILED}:
+        record = await voice_message.update_voice_message_transcription_state(
             db,
-            voice_message_id=updated.id,
-            channel_id=updated.channel_id,
-            user_id=updated.user_id,
-            relative_audio_path=updated.audio_path,
-        )
-        updated = await voice_message.select_voice_message_by_id(db, updated.id) or updated
-    except Exception as exc:
+            voice_message_id,
+            transcription_status=TRANSCRIPTION_PENDING,
+        ) or record
+    queued = await enqueue_voice_message_transcription(voice_message_id)
+    if not queued and record.transcription_status not in {TRANSCRIPTION_PENDING, TRANSCRIPTION_PROCESSING}:
         logger.warning(
-            "voice_message_excitement_reanalysis_failed id=%s path=%s format=%s detail=%s",
-            updated.id,
-            updated.audio_path,
-            updated.audio_format,
-            exc,
+            "voice_message_transcription_reenqueue_skipped id=%s status=%s",
+            voice_message_id,
+            record.transcription_status,
         )
-
-    sender = await _get_sender(db, updated.user_id)
+    latest = await voice_message.select_voice_message_by_id(db, voice_message_id) or record
+    sender = await _get_sender(db, latest.user_id)
     return success_response(
-        message="Voice message transcribed",
-        data=_build_voice_message_info(updated, sender),
+        message="Voice message transcription queued",
+        data=_build_voice_message_info(latest, sender),
     )

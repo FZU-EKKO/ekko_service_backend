@@ -1,4 +1,4 @@
-from sqlalchemy import BIGINT, BOOLEAN, CHAR, DOUBLE, JSON, ForeignKeyConstraint, Index, Integer, PrimaryKeyConstraint, Text, VARCHAR
+from sqlalchemy import BIGINT, BOOLEAN, CHAR, DOUBLE, ForeignKeyConstraint, Index, Integer, PrimaryKeyConstraint, Text, VARCHAR
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base
@@ -27,11 +27,7 @@ class VoiceMessages(Base):
     )
     audio_path: Mapped[str] = mapped_column(Text, nullable=False, comment="Stored audio path")
     audio_duration_ms: Mapped[int] = mapped_column(Integer, default=0, comment="Audio duration in milliseconds")
-    audio_format: Mapped[str] = mapped_column(VARCHAR(20), default="webm", comment="Audio file format")
-    mime_type: Mapped[str | None] = mapped_column(VARCHAR(100), nullable=True, comment="Audio MIME type")
-    file_size: Mapped[int] = mapped_column(BIGINT, default=0, comment="Audio file size in bytes")
     transcript_text: Mapped[str | None] = mapped_column(Text, nullable=True, comment="Optional transcript text")
-    waveform: Mapped[list[int] | None] = mapped_column(JSON, nullable=True, comment="Waveform preview buckets")
     avg_amplitude: Mapped[float | None] = mapped_column(
         DOUBLE,
         nullable=True,
@@ -48,3 +44,9 @@ class VoiceMessages(Base):
         comment="Speech-rate feature as transcript characters per second",
     )
     is_excited: Mapped[bool] = mapped_column(BOOLEAN, default=False, comment="Whether the utterance is excited")
+    transcription_status: Mapped[str] = mapped_column(
+        VARCHAR(20),
+        default="pending",
+        nullable=False,
+        comment="Asynchronous transcription status",
+    )

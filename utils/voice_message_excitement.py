@@ -9,19 +9,18 @@ from scipy.signal import find_peaks, hilbert, resample_poly
 
 from config.voice_message_analysis_config import (
     VOICE_MESSAGE_EXCITEMENT_AMPLITUDE_WEIGHT,
+    VOICE_MESSAGE_EXCITEMENT_BASELINE_SENTENCES,
     VOICE_MESSAGE_EXCITEMENT_CHAR_RATE_WEIGHT,
+    VOICE_MESSAGE_EXCITEMENT_FULL_SCORE_RATIO,
+    VOICE_MESSAGE_EXCITEMENT_MIN_COMPOSITE_METRICS,
     VOICE_MESSAGE_EXCITEMENT_PEAK_RATE_WEIGHT,
+    VOICE_MESSAGE_EXCITEMENT_THRESHOLD,
 )
 from crud import voice_message
 from utils.voice_message_transcriber import resolve_uploaded_audio_path
 
 
 HILBERT_SAMPLE_RATE = 16000
-MIN_EVALUATION_SENTENCES = 10
-MIN_COMPOSITE_METRICS = 2
-MAX_BASELINE_SENTENCES = 500
-METRIC_FULL_SCORE_RATIO = 1.8
-COMPOSITE_EXCITEMENT_THRESHOLD = 0.68
 PEAK_SMOOTHING_WINDOW_MS = 40
 PEAK_MIN_DISTANCE_MS = 120
 
@@ -52,7 +51,7 @@ def _decode_audio_to_mono_pcm(audio_path: str):
     if not pcm:
         raise RuntimeError("decoded audio is empty")
     if sample_width != 2:
-        raise RuntimeError("voice excitement analysis only supports 16-bit PCM wav")
+        raise RuntimeError("voice excitement analysis only supports 16-bit PCM wav") from None
 
     samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float64) / 32768.0
     if channels > 1:
@@ -114,10 +113,10 @@ def _compute_char_rate(*, transcript_text: str | None, audio_duration_ms: int) -
     return len(normalized_text) / duration_seconds
 
 
-def _metric_ratio_score(current_value: float | None, historical_value: float, *, full_score_ratio: float) -> float | None:
-    if current_value is None or historical_value <= 0:
+def _metric_ratio_score(current_value: float | None, baseline_value: float, *, full_score_ratio: float) -> float | None:
+    if current_value is None or baseline_value <= 0:
         return None
-    ratio = current_value / historical_value
+    ratio = current_value / baseline_value
     if ratio <= 1.0:
         return 0.0
     normalized = (ratio - 1.0) / max(full_score_ratio - 1.0, 1e-6)
@@ -161,57 +160,58 @@ async def analyze_and_persist_voice_message_excitement(
         transcript_text=record.transcript_text,
         audio_duration_ms=record.audio_duration_ms,
     )
+
     profile = await voice_message.create_or_get_user_channel_voice_profile(
         db,
         channel_id=channel_id,
         user_id=user_id,
     )
 
-    should_evaluate = profile.total_sentence_count >= MIN_EVALUATION_SENTENCES
+    should_evaluate = profile.baseline_sample_count >= VOICE_MESSAGE_EXCITEMENT_BASELINE_SENTENCES
     is_excited = False
     if should_evaluate:
         amplitude_score = _metric_ratio_score(
             feature_summary.avg_amplitude,
-            profile.historical_avg_amplitude,
-            full_score_ratio=METRIC_FULL_SCORE_RATIO,
+            profile.baseline_avg_amplitude,
+            full_score_ratio=VOICE_MESSAGE_EXCITEMENT_FULL_SCORE_RATIO,
         )
         peak_rate_score = _metric_ratio_score(
             feature_summary.avg_frequency,
-            profile.historical_avg_frequency,
-            full_score_ratio=METRIC_FULL_SCORE_RATIO,
+            profile.baseline_avg_frequency,
+            full_score_ratio=VOICE_MESSAGE_EXCITEMENT_FULL_SCORE_RATIO,
         )
         char_rate_score = _metric_ratio_score(
             feature_summary.avg_char_rate,
-            profile.historical_avg_char_rate,
-            full_score_ratio=METRIC_FULL_SCORE_RATIO,
+            profile.baseline_avg_char_rate,
+            full_score_ratio=VOICE_MESSAGE_EXCITEMENT_FULL_SCORE_RATIO,
         )
         composite_score, metric_count = _composite_excitation_score(
             amplitude_score=amplitude_score,
             peak_rate_score=peak_rate_score,
             char_rate_score=char_rate_score,
         )
-        is_excited = metric_count >= MIN_COMPOSITE_METRICS and composite_score >= COMPOSITE_EXCITEMENT_THRESHOLD
+        is_excited = (
+            metric_count >= VOICE_MESSAGE_EXCITEMENT_MIN_COMPOSITE_METRICS
+            and composite_score >= VOICE_MESSAGE_EXCITEMENT_THRESHOLD
+        )
 
-    next_total_sentence_count = profile.total_sentence_count + 1
-    next_baseline_sentence_count = profile.baseline_sentence_count
-    next_historical_avg_amplitude = profile.historical_avg_amplitude
-    next_historical_avg_frequency = profile.historical_avg_frequency
-    next_historical_avg_char_rate = profile.historical_avg_char_rate
-    next_char_rate_sample_count = profile.char_rate_sample_count
+    next_sample_count = profile.baseline_sample_count
+    next_avg_amplitude = profile.baseline_avg_amplitude
+    next_avg_frequency = profile.baseline_avg_frequency
+    next_avg_char_rate = profile.baseline_avg_char_rate
 
-    if profile.baseline_sentence_count < MAX_BASELINE_SENTENCES:
-        next_baseline_sentence_count = profile.baseline_sentence_count + 1
-        next_historical_avg_amplitude = (
-            (profile.historical_avg_amplitude * profile.baseline_sentence_count) + feature_summary.avg_amplitude
-        ) / next_baseline_sentence_count
-        next_historical_avg_frequency = (
-            (profile.historical_avg_frequency * profile.baseline_sentence_count) + feature_summary.avg_frequency
-        ) / next_baseline_sentence_count
-        if feature_summary.avg_char_rate is not None:
-            next_char_rate_sample_count = profile.char_rate_sample_count + 1
-            next_historical_avg_char_rate = (
-                (profile.historical_avg_char_rate * profile.char_rate_sample_count) + feature_summary.avg_char_rate
-            ) / next_char_rate_sample_count
+    if profile.baseline_sample_count < VOICE_MESSAGE_EXCITEMENT_BASELINE_SENTENCES:
+        next_sample_count = profile.baseline_sample_count + 1
+        next_avg_amplitude = (
+            (profile.baseline_avg_amplitude * profile.baseline_sample_count) + feature_summary.avg_amplitude
+        ) / next_sample_count
+        next_avg_frequency = (
+            (profile.baseline_avg_frequency * profile.baseline_sample_count) + feature_summary.avg_frequency
+        ) / next_sample_count
+        current_char_rate = feature_summary.avg_char_rate or 0.0
+        next_avg_char_rate = (
+            (profile.baseline_avg_char_rate * profile.baseline_sample_count) + current_char_rate
+        ) / next_sample_count
 
     await voice_message.update_voice_message_analysis(
         db,
@@ -225,10 +225,8 @@ async def analyze_and_persist_voice_message_excitement(
         db,
         channel_id=channel_id,
         user_id=user_id,
-        historical_avg_amplitude=next_historical_avg_amplitude,
-        historical_avg_frequency=next_historical_avg_frequency,
-        historical_avg_char_rate=next_historical_avg_char_rate,
-        char_rate_sample_count=next_char_rate_sample_count,
-        total_sentence_count=next_total_sentence_count,
-        baseline_sentence_count=next_baseline_sentence_count,
+        baseline_avg_amplitude=next_avg_amplitude,
+        baseline_avg_frequency=next_avg_frequency,
+        baseline_avg_char_rate=next_avg_char_rate,
+        baseline_sample_count=next_sample_count,
     )

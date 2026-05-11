@@ -16,15 +16,12 @@ class VoiceMessageInfo(BaseModel):
     client_message_id: str | None = None
     audio_path: str
     audio_duration_ms: int
-    audio_format: str
-    mime_type: str | None = None
-    file_size: int
     transcript_text: str | None = None
-    waveform: list[int] | None = None
     avg_amplitude: float | None = None
     avg_frequency: float | None = None
     avg_char_rate: float | None = None
     is_excited: bool = False
+    transcription_status: str = "pending"
     created_at: datetime
     updated_at: datetime
     user: VoiceMessageUserInfo
@@ -46,15 +43,12 @@ class VoiceMessageRecord(BaseModel):
     client_message_id: str | None = None
     audio_path: str
     audio_duration_ms: int
-    audio_format: str
-    mime_type: str | None = None
-    file_size: int
     transcript_text: str | None = None
-    waveform: list[int] | None = None
     avg_amplitude: float | None = None
     avg_frequency: float | None = None
     avg_char_rate: float | None = None
     is_excited: bool = False
+    transcription_status: str = "pending"
     created_at: datetime
     updated_at: datetime
 

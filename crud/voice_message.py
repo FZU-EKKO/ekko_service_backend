@@ -8,6 +8,21 @@ from models.user_channel_voice_profile import UserChannelVoiceProfile
 from models.voice_message import VoiceMessages
 
 
+async def select_voice_messages_by_transcription_statuses(
+    db: AsyncSession,
+    *,
+    statuses: list[str],
+):
+    if not statuses:
+        return []
+    result = await db.execute(
+        select(VoiceMessages)
+        .where(VoiceMessages.transcription_status.in_(statuses))
+        .order_by(VoiceMessages.created_at.asc(), VoiceMessages.id.asc())
+    )
+    return list(result.scalars().all())
+
+
 async def get_voice_message_by_client_id(db: AsyncSession, *, channel_id: int, user_id: str, client_message_id: str):
     result = await db.execute(
         select(VoiceMessages).where(
@@ -31,16 +46,13 @@ async def create_voice_message(
     user_id: str,
     audio_path: str,
     audio_duration_ms: int,
-    audio_format: str,
-    mime_type: str | None,
-    file_size: int,
     client_message_id: str | None = None,
     transcript_text: str | None = None,
-    waveform: list[int] | None = None,
     avg_amplitude: float | None = None,
     avg_frequency: float | None = None,
     avg_char_rate: float | None = None,
     is_excited: bool = False,
+    transcription_status: str = "pending",
 ):
     voice_message = VoiceMessages(
         channel_id=channel_id,
@@ -48,15 +60,12 @@ async def create_voice_message(
         client_message_id=client_message_id,
         audio_path=audio_path,
         audio_duration_ms=audio_duration_ms,
-        audio_format=audio_format,
-        mime_type=mime_type,
-        file_size=file_size,
         transcript_text=transcript_text,
-        waveform=waveform,
         avg_amplitude=avg_amplitude,
         avg_frequency=avg_frequency,
         avg_char_rate=avg_char_rate,
         is_excited=is_excited,
+        transcription_status=transcription_status,
     )
     db.add(voice_message)
     await db.commit()
@@ -127,11 +136,14 @@ async def update_voice_message_transcript(
     voice_message_id: int,
     *,
     transcript_text: str | None,
+    transcription_status: str | None = None,
 ):
     record = await select_voice_message_by_id(db, voice_message_id)
     if not record:
         return None
     record.transcript_text = transcript_text
+    if transcription_status is not None:
+        record.transcription_status = transcription_status
     await db.commit()
     await db.refresh(record)
     return record
@@ -153,6 +165,21 @@ async def update_voice_message_analysis(
     record.avg_frequency = avg_frequency
     record.avg_char_rate = avg_char_rate
     record.is_excited = is_excited
+    await db.commit()
+    await db.refresh(record)
+    return record
+
+
+async def update_voice_message_transcription_state(
+    db: AsyncSession,
+    voice_message_id: int,
+    *,
+    transcription_status: str,
+):
+    record = await select_voice_message_by_id(db, voice_message_id)
+    if not record:
+        return None
+    record.transcription_status = transcription_status
     await db.commit()
     await db.refresh(record)
     return record
@@ -195,20 +222,16 @@ async def update_user_channel_voice_profile(
     *,
     channel_id: int,
     user_id: str,
-    historical_avg_amplitude: float,
-    historical_avg_frequency: float,
-    historical_avg_char_rate: float,
-    char_rate_sample_count: int,
-    total_sentence_count: int,
-    baseline_sentence_count: int,
+    baseline_avg_amplitude: float,
+    baseline_avg_frequency: float,
+    baseline_avg_char_rate: float,
+    baseline_sample_count: int,
 ):
     profile = await create_or_get_user_channel_voice_profile(db, channel_id=channel_id, user_id=user_id)
-    profile.historical_avg_amplitude = historical_avg_amplitude
-    profile.historical_avg_frequency = historical_avg_frequency
-    profile.historical_avg_char_rate = historical_avg_char_rate
-    profile.char_rate_sample_count = char_rate_sample_count
-    profile.total_sentence_count = total_sentence_count
-    profile.baseline_sentence_count = baseline_sentence_count
+    profile.baseline_avg_amplitude = baseline_avg_amplitude
+    profile.baseline_avg_frequency = baseline_avg_frequency
+    profile.baseline_avg_char_rate = baseline_avg_char_rate
+    profile.baseline_sample_count = baseline_sample_count
     await db.commit()
     await db.refresh(profile)
     return profile
