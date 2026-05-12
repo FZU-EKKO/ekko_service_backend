@@ -1,4 +1,4 @@
-from config.env import get_bool_env, get_env, get_float_env, get_int_env
+from config.env import get_bool_env, get_env, get_int_env
 
 
 AUDIO_EVENT_ENABLED = get_bool_env("EKKO_AUDIO_EVENT_ENABLED", default=True)
@@ -12,4 +12,3 @@ AUDIO_EVENT_ENFORCE_FILTER = get_env("EKKO_AUDIO_EVENT_ENFORCE_FILTER", default=
     "yes",
     "on",
 }
-AUDIO_EVENT_MIN_SPEECH_SCORE = get_float_env("EKKO_AUDIO_EVENT_MIN_SPEECH_SCORE", default=0.35)

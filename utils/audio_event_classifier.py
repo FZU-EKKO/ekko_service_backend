@@ -11,7 +11,6 @@ from urllib.error import HTTPError, URLError
 from config.audio_event_service_config import (
     AUDIO_EVENT_ENABLED,
     AUDIO_EVENT_ENFORCE_FILTER,
-    AUDIO_EVENT_MIN_SPEECH_SCORE,
     AUDIO_EVENT_REMOTE_TIMEOUT_SECONDS,
     AUDIO_EVENT_REMOTE_TOKEN,
     AUDIO_EVENT_REMOTE_TOP_K,
@@ -112,11 +111,8 @@ def classify_audio_event_bytes(audio_bytes: bytes, *, audio_format: str = "wav")
 def should_drop_audio_event(classification: dict | None) -> bool:
     if not classification:
         return False
-    speech_score = float(classification.get("speech_score") or 0.0)
     is_speech = bool(classification.get("is_speech"))
     should_drop = bool(classification.get("should_drop"))
-    if speech_score >= AUDIO_EVENT_MIN_SPEECH_SCORE and is_speech:
-        return False
     if should_drop:
         return True
     return AUDIO_EVENT_ENFORCE_FILTER and not is_speech
