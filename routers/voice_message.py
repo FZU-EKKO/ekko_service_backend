@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
+from config.audio_event_service_config import AUDIO_EVENT_ENABLED
 from config.db_config import get_db
 from config.voice_message_asr_config import VOICE_MESSAGE_ASR_CALLBACK_TOKEN
 from crud import channel, domain, voice_message
@@ -97,6 +98,14 @@ def _classify_sentence_wav_bytes(
         _summarize_audio_event(classification),
     )
     return dropped, classification
+
+
+def _should_persist_audio_message(classification: dict | None) -> bool:
+    if not AUDIO_EVENT_ENABLED:
+        return True
+    if not classification:
+        return False
+    return bool(classification.get("is_speech"))
 
 
 async def _assert_channel_access(db: AsyncSession, *, channel_id: int, user_id: str):
@@ -217,14 +226,14 @@ async def upload_voice_message(
     if not payload:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Uploaded audio file is empty")
 
-    dropped, _classification = _classify_sentence_wav_bytes(
+    dropped, classification = _classify_sentence_wav_bytes(
         wav_bytes=payload,
         channel_id=channel_id,
         user_id=user.id,
         speech_ms=duration_ms,
         log_prefix="voice_message_upload",
     )
-    if dropped:
+    if dropped or not _should_persist_audio_message(classification):
         return success_response(message="Voice message dropped by audio event filter", data=None)
 
     saved = save_voice_message_bytes(
