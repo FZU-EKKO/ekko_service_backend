@@ -53,3 +53,9 @@ class VoiceMessageRecord(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class VoiceMessageTranscriptionCallbackRequest(BaseModel):
+    voice_message_id: int
+    transcription_status: str
+    transcript_text: str | None = None

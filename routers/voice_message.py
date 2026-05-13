@@ -2,16 +2,22 @@ import logging
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
 from config.db_config import get_db
+from config.voice_message_asr_config import VOICE_MESSAGE_ASR_CALLBACK_TOKEN
 from crud import channel, domain, voice_message
 from models.channel import ChannelType
 from models.users import Users
-from schemas.voice_message import VoiceMessageInfo, VoiceMessagePage, VoiceMessageUserInfo
+from schemas.voice_message import (
+    VoiceMessageInfo,
+    VoiceMessagePage,
+    VoiceMessageTranscriptionCallbackRequest,
+    VoiceMessageUserInfo,
+)
 from utils.auth import get_current_user
 from utils.audio_event_classifier import classify_audio_event_bytes, should_drop_audio_event
 from utils.file_storage import save_voice_message_bytes
@@ -142,6 +148,7 @@ def _build_voice_message_info(record, sender: Users) -> VoiceMessageInfo:
         ),
     )
 
+
 def _normalize_transcript_text(transcript_text: str | None) -> str | None:
     normalized = (transcript_text or "").strip()
     return normalized or None
@@ -152,13 +159,30 @@ def _is_unrecognized_speech(transcript_text: str | None) -> bool:
     return bool(normalized and normalized.casefold() == UNRECOGNIZED_SPEECH_TEXT.casefold())
 
 
+async def _analyze_voice_message_excitement(db: AsyncSession, record) -> None:
+    try:
+        await analyze_and_persist_voice_message_excitement(
+            db,
+            voice_message_id=record.id,
+            channel_id=record.channel_id,
+            user_id=record.user_id,
+            relative_audio_path=record.audio_path,
+        )
+    except Exception as exc:
+        logger.warning(
+            "voice_message_excitement_analysis_failed id=%s path=%s detail=%s",
+            record.id,
+            record.audio_path,
+            exc,
+        )
+
+
 @ekko.post("/upload")
 async def upload_voice_message(
     channel_id: Annotated[int, Form(...)],
     duration_ms: Annotated[int, Form(...)],
     file: Annotated[UploadFile, File(...)],
     client_message_id: Annotated[str | None, Form()] = None,
-    transcript_text: Annotated[str | None, Form()] = None,
     user: Users = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -201,10 +225,6 @@ async def upload_voice_message(
     if dropped:
         return success_response(message="Voice message dropped by audio event filter", data=None)
 
-    transcript_value = _normalize_transcript_text(transcript_text)
-    if _is_unrecognized_speech(transcript_value):
-        return success_response(message="Voice message dropped because transcript is unrecognized", data=None)
-
     saved = save_voice_message_bytes(
         payload,
         channel_id=channel_id,
@@ -218,28 +238,19 @@ async def upload_voice_message(
         client_message_id=client_message_id,
         audio_path=saved["path"],
         audio_duration_ms=duration_ms,
-        transcript_text=transcript_value,
-        transcription_status=TRANSCRIPTION_DONE if transcript_value else TRANSCRIPTION_PENDING,
+        transcript_text=None,
+        transcription_status=TRANSCRIPTION_PENDING,
     )
-    if created.transcript_text and not _is_unrecognized_speech(created.transcript_text):
+    if created.transcription_status == TRANSCRIPTION_PENDING:
         try:
-            await analyze_and_persist_voice_message_excitement(
-                db,
-                voice_message_id=created.id,
-                channel_id=created.channel_id,
-                user_id=created.user_id,
-                relative_audio_path=created.audio_path,
-            )
-            created = await voice_message.select_voice_message_by_id(db, created.id) or created
-        except Exception as exc:
-            logger.warning(
-                "voice_message_excitement_analysis_failed id=%s path=%s detail=%s",
+            queued = await enqueue_voice_message_transcription(
                 created.id,
-                created.audio_path,
-                exc,
+                audio_bytes=payload,
+                audio_format=suffix.lstrip("."),
             )
-    elif created.transcription_status == TRANSCRIPTION_PENDING:
-        queued = await enqueue_voice_message_transcription(created.id)
+        except Exception as exc:
+            logger.warning("voice_message_transcription_enqueue_failed id=%s detail=%s", created.id, exc)
+            queued = False
         if not queued:
             logger.warning(
                 "voice_message_transcription_enqueue_skipped id=%s status=%s",
@@ -250,6 +261,7 @@ async def upload_voice_message(
         message="Voice message uploaded",
         data=_build_voice_message_info(created, user),
     )
+
 
 @ekko.get("/channel/{channel_id}")
 async def list_voice_messages_by_channel(
@@ -292,7 +304,11 @@ async def transcribe_voice_message(
             voice_message_id,
             transcription_status=TRANSCRIPTION_PENDING,
         ) or record
-    queued = await enqueue_voice_message_transcription(voice_message_id)
+    try:
+        queued = await enqueue_voice_message_transcription(voice_message_id)
+    except Exception as exc:
+        logger.warning("voice_message_transcription_reenqueue_failed id=%s detail=%s", voice_message_id, exc)
+        queued = False
     if not queued and record.transcription_status not in {TRANSCRIPTION_PENDING, TRANSCRIPTION_PROCESSING}:
         logger.warning(
             "voice_message_transcription_reenqueue_skipped id=%s status=%s",
@@ -305,3 +321,64 @@ async def transcribe_voice_message(
         message="Voice message transcription queued",
         data=_build_voice_message_info(latest, sender),
     )
+
+
+@ekko.post("/internal/transcription-callback")
+async def update_voice_message_transcription_callback(
+    body: VoiceMessageTranscriptionCallbackRequest,
+    db: AsyncSession = Depends(get_db),
+    authorization: str | None = Header(default=None),
+):
+    expected = f"Bearer {VOICE_MESSAGE_ASR_CALLBACK_TOKEN}"
+    if not VOICE_MESSAGE_ASR_CALLBACK_TOKEN or authorization != expected:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
+    record = await voice_message.select_voice_message_by_id(db, body.voice_message_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice message does not exist")
+
+    transcript_value = _normalize_transcript_text(body.transcript_text)
+    if body.transcription_status == TRANSCRIPTION_DONE:
+        if _is_unrecognized_speech(transcript_value):
+            body.transcription_status = TRANSCRIPTION_DROPPED
+            transcript_value = None
+        else:
+            record = await voice_message.update_voice_message_transcript(
+                db,
+                body.voice_message_id,
+                transcript_text=transcript_value,
+                transcription_status=TRANSCRIPTION_DONE,
+            )
+            if record:
+                await _analyze_voice_message_excitement(db, record)
+            return success_response(message="Voice message transcription callback applied", data=None)
+
+    if body.transcription_status == TRANSCRIPTION_DROPPED:
+        await voice_message.update_voice_message_transcript(
+            db,
+            body.voice_message_id,
+            transcript_text=None,
+            transcription_status=TRANSCRIPTION_DROPPED,
+        )
+    elif body.transcription_status == TRANSCRIPTION_FAILED:
+        await voice_message.update_voice_message_transcription_state(
+            db,
+            body.voice_message_id,
+            transcription_status=TRANSCRIPTION_FAILED,
+        )
+    elif body.transcription_status == TRANSCRIPTION_PROCESSING:
+        await voice_message.update_voice_message_transcription_state(
+            db,
+            body.voice_message_id,
+            transcription_status=TRANSCRIPTION_PROCESSING,
+        )
+    elif body.transcription_status == TRANSCRIPTION_PENDING:
+        await voice_message.update_voice_message_transcription_state(
+            db,
+            body.voice_message_id,
+            transcription_status=TRANSCRIPTION_PENDING,
+        )
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported transcription status")
+
+    return success_response(message="Voice message transcription callback applied", data=None)
