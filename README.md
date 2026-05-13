@@ -19,6 +19,7 @@ ASR wiring:
 - `ekko/.env` -> `EKKO_ASR_REMOTE_QUEUE_URL` should point to `ekko_asr_service`'s `POST /asr/transcribe/queue`
 - `ekko/.env` -> `EKKO_ASR_REMOTE_TOKEN` must match `ekko_asr_service/.env` -> `EKKO_ASR_SERVICE_TOKEN`
 - `ekko/.env` -> `EKKO_ASR_CALLBACK_URL` should point back to `ekko`'s `POST /api/voice-messages/internal/transcription-callback`
+- `ekko` only dispatches and retries transcription tasks; the actual ASR queue lives in `ekko_asr_service`
 
 Judge service wiring:
 

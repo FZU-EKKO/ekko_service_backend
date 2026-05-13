@@ -7,9 +7,9 @@ from fastapi.staticfiles import StaticFiles
 from routers import users, domain, channel, email, upload, voice_message, channel_analysis
 from utils.exception_handler import register_exception_handler
 from utils.file_storage import UPLOAD_ROOT, ensure_upload_dirs
-from utils.voice_message_transcription_queue import (
-    initialize_voice_message_transcription_queue,
-    shutdown_voice_message_transcription_queue,
+from utils.voice_message_transcription_dispatcher import (
+    initialize_voice_message_transcription_dispatcher,
+    shutdown_voice_message_transcription_dispatcher,
 )
 
 ekko = FastAPI()
@@ -30,13 +30,13 @@ ekko.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
 
 @ekko.on_event("startup")
-async def startup_voice_message_transcription_queue() -> None:
-    await initialize_voice_message_transcription_queue()
+async def startup_voice_message_transcription_dispatcher() -> None:
+    await initialize_voice_message_transcription_dispatcher()
 
 
 @ekko.on_event("shutdown")
-async def shutdown_voice_message_transcription_queue_worker() -> None:
-    await shutdown_voice_message_transcription_queue()
+async def shutdown_voice_message_transcription_dispatcher_worker() -> None:
+    await shutdown_voice_message_transcription_dispatcher()
 
 
 origins=[

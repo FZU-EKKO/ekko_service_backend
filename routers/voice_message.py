@@ -23,15 +23,15 @@ from utils.audio_event_classifier import classify_audio_event_bytes, should_drop
 from utils.file_storage import save_voice_message_bytes
 from utils.response import success_response
 from utils.voice_message_excitement import analyze_and_persist_voice_message_excitement
+from utils.voice_message_transcription_dispatcher import (
+    dispatch_voice_message_transcription,
+)
 from utils.voice_message_status import (
     TRANSCRIPTION_DONE,
     TRANSCRIPTION_DROPPED,
     TRANSCRIPTION_FAILED,
     TRANSCRIPTION_PENDING,
     TRANSCRIPTION_PROCESSING,
-)
-from utils.voice_message_transcription_queue import (
-    enqueue_voice_message_transcription,
 )
 
 
@@ -245,7 +245,7 @@ async def upload_voice_message(
     )
     if created.transcription_status == TRANSCRIPTION_PENDING:
         try:
-            queued = await enqueue_voice_message_transcription(
+            queued = await dispatch_voice_message_transcription(
                 created.id,
                 audio_bytes=payload,
                 audio_format=suffix.lstrip("."),
@@ -307,7 +307,7 @@ async def transcribe_voice_message(
             transcription_status=TRANSCRIPTION_PENDING,
         ) or record
     try:
-        queued = await enqueue_voice_message_transcription(voice_message_id)
+        queued = await dispatch_voice_message_transcription(voice_message_id)
     except Exception as exc:
         logger.warning("voice_message_transcription_reenqueue_failed id=%s detail=%s", voice_message_id, exc)
         queued = False

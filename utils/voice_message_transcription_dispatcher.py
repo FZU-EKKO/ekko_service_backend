@@ -13,19 +13,17 @@ from config.voice_message_asr_config import (
     VOICE_MESSAGE_ASR_CALLBACK_URL,
     VOICE_MESSAGE_ASR_LANGUAGE,
     VOICE_MESSAGE_ASR_REMOTE_QUEUE_URL,
-    VOICE_MESSAGE_ASR_RESTORE_INTERVAL_SECONDS,
     VOICE_MESSAGE_ASR_REMOTE_TIMEOUT_SECONDS,
     VOICE_MESSAGE_ASR_REMOTE_TOKEN,
+    VOICE_MESSAGE_ASR_RESTORE_INTERVAL_SECONDS,
 )
 from crud import voice_message
 from utils.network import should_bypass_proxy
-from utils.voice_message_status import (
-    ACTIVE_TRANSCRIPTION_STATUSES,
-)
+from utils.voice_message_status import ACTIVE_TRANSCRIPTION_STATUSES
 from utils.voice_message_transcriber import resolve_audio_format, resolve_uploaded_audio_path
 
 
-logger = logging.getLogger("ekko.voice_message_transcription_queue")
+logger = logging.getLogger("ekko.voice_message_transcription_dispatcher")
 
 _restore_task: asyncio.Task[None] | None = None
 
@@ -39,7 +37,7 @@ def _open_json_request(*, url: str, payload: dict, headers: dict[str, str]) -> d
     return json.loads(raw)
 
 
-def _enqueue_remote_transcription(
+def _dispatch_remote_transcription(
     *,
     voice_message_id: int,
     audio_bytes: bytes,
@@ -68,7 +66,7 @@ def _enqueue_remote_transcription(
     }
 
     logger.info(
-        "voice_message_transcription_enqueue request url=%s id=%s format=%s bytes=%s",
+        "voice_message_transcription_dispatch request url=%s id=%s format=%s bytes=%s",
         VOICE_MESSAGE_ASR_REMOTE_QUEUE_URL,
         voice_message_id,
         audio_format,
@@ -83,39 +81,39 @@ def _enqueue_remote_transcription(
     except HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="ignore")
         logger.error(
-            "voice_message_transcription_enqueue http_error url=%s id=%s status=%s body=%s",
+            "voice_message_transcription_dispatch http_error url=%s id=%s status=%s body=%s",
             VOICE_MESSAGE_ASR_REMOTE_QUEUE_URL,
             voice_message_id,
             exc.code,
             error_body,
         )
-        raise RuntimeError(f"ASR enqueue HTTP {exc.code}: {error_body}") from exc
+        raise RuntimeError(f"ASR dispatch HTTP {exc.code}: {error_body}") from exc
     except URLError as exc:
         logger.error(
-            "voice_message_transcription_enqueue connection_failed url=%s id=%s reason=%s",
+            "voice_message_transcription_dispatch connection_failed url=%s id=%s reason=%s",
             VOICE_MESSAGE_ASR_REMOTE_QUEUE_URL,
             voice_message_id,
             exc.reason,
         )
-        raise RuntimeError(f"ASR enqueue connection failed: {exc.reason}") from exc
+        raise RuntimeError(f"ASR dispatch connection failed: {exc.reason}") from exc
     except json.JSONDecodeError as exc:
         logger.error(
-            "voice_message_transcription_enqueue invalid_json_response url=%s id=%s",
+            "voice_message_transcription_dispatch invalid_json_response url=%s id=%s",
             VOICE_MESSAGE_ASR_REMOTE_QUEUE_URL,
             voice_message_id,
         )
-        raise RuntimeError("ASR enqueue returned invalid JSON") from exc
+        raise RuntimeError("ASR dispatch returned invalid JSON") from exc
 
     queued = bool(data.get("queued"))
     logger.info(
-        "voice_message_transcription_enqueue success id=%s queued=%s",
+        "voice_message_transcription_dispatch success id=%s queued=%s",
         voice_message_id,
         queued,
     )
     return queued
 
 
-async def enqueue_voice_message_transcription(
+async def dispatch_voice_message_transcription(
     voice_message_id: int,
     *,
     audio_bytes: bytes | None = None,
@@ -128,7 +126,7 @@ async def enqueue_voice_message_transcription(
         raise ValueError("audio_format is required when audio_bytes is provided")
 
     return await asyncio.to_thread(
-        _enqueue_remote_transcription,
+        _dispatch_remote_transcription,
         voice_message_id=voice_message_id,
         audio_bytes=audio_bytes,
         audio_format=str(audio_format or "wav"),
@@ -147,14 +145,14 @@ async def _load_audio_by_id(voice_message_id: int) -> tuple[bytes, str]:
     return audio_bytes, resolve_audio_format(resolved_path)
 
 
-async def initialize_voice_message_transcription_queue() -> None:
+async def initialize_voice_message_transcription_dispatcher() -> None:
     global _restore_task
     await _restore_pending_voice_message_transcriptions()
     if _restore_task is None or _restore_task.done():
         _restore_task = asyncio.create_task(_restore_pending_loop())
 
 
-async def shutdown_voice_message_transcription_queue() -> None:
+async def shutdown_voice_message_transcription_dispatcher() -> None:
     global _restore_task
     if _restore_task is None:
         return
@@ -176,7 +174,7 @@ async def _restore_pending_voice_message_transcriptions() -> None:
     restored = 0
     for record in records:
         try:
-            queued = await enqueue_voice_message_transcription(record.id)
+            queued = await dispatch_voice_message_transcription(record.id)
         except Exception:
             logger.exception("restore_pending_voice_message_transcription_failed id=%s", record.id)
             continue
