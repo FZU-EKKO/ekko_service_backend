@@ -122,7 +122,7 @@ async def enqueue_voice_message_transcription(
     audio_format: str | None = None,
 ) -> bool:
     if audio_bytes is None:
-        audio_bytes, resolved_format = await asyncio.to_thread(_load_audio_by_id, voice_message_id)
+        audio_bytes, resolved_format = await _load_audio_by_id(voice_message_id)
         audio_format = audio_format or resolved_format
     elif not audio_format:
         raise ValueError("audio_format is required when audio_bytes is provided")
@@ -135,17 +135,16 @@ async def enqueue_voice_message_transcription(
     )
 
 
-def _load_audio_by_id(voice_message_id: int) -> tuple[bytes, str]:
-    async def _fetch_path() -> str:
-        async with AsyncSessionLocal() as db:
-            record = await voice_message.select_voice_message_by_id(db, voice_message_id)
-            if not record:
-                raise FileNotFoundError(f"Voice message {voice_message_id} does not exist")
-            return record.audio_path
+async def _load_audio_by_id(voice_message_id: int) -> tuple[bytes, str]:
+    async with AsyncSessionLocal() as db:
+        record = await voice_message.select_voice_message_by_id(db, voice_message_id)
+        if not record:
+            raise FileNotFoundError(f"Voice message {voice_message_id} does not exist")
+        relative_path = record.audio_path
 
-    relative_path = asyncio.run(_fetch_path())
     resolved_path = resolve_uploaded_audio_path(relative_path)
-    return resolved_path.read_bytes(), resolve_audio_format(resolved_path)
+    audio_bytes = await asyncio.to_thread(resolved_path.read_bytes)
+    return audio_bytes, resolve_audio_format(resolved_path)
 
 
 async def initialize_voice_message_transcription_queue() -> None:
