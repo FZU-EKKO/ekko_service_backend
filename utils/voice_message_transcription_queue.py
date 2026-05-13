@@ -27,6 +27,9 @@ logger = logging.getLogger("ekko.voice_message_transcription_queue")
 
 TRANSCRIPTION_PENDING = "pending"
 TRANSCRIPTION_PROCESSING = "processing"
+TRANSCRIPTION_DONE = "done"
+TRANSCRIPTION_FAILED = "failed"
+TRANSCRIPTION_DROPPED = "dropped"
 
 ACTIVE_TRANSCRIPTION_STATUSES = [
     TRANSCRIPTION_PENDING,
