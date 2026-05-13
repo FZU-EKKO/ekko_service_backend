@@ -300,7 +300,13 @@ async def transcribe_voice_message(
             message="Voice message transcript fetched",
             data=_build_voice_message_info(record, sender),
         )
-    if record.transcription_status in {TRANSCRIPTION_DROPPED, TRANSCRIPTION_FAILED}:
+    if record.transcription_status == TRANSCRIPTION_DROPPED:
+        sender = await _get_sender(db, record.user_id)
+        return success_response(
+            message="Voice message transcription dropped",
+            data=_build_voice_message_info(record, sender),
+        )
+    if record.transcription_status == TRANSCRIPTION_FAILED:
         record = await voice_message.update_voice_message_transcription_state(
             db,
             voice_message_id,
