@@ -23,12 +23,14 @@ from utils.audio_event_classifier import classify_audio_event_bytes, should_drop
 from utils.file_storage import save_voice_message_bytes
 from utils.response import success_response
 from utils.voice_message_excitement import analyze_and_persist_voice_message_excitement
-from utils.voice_message_transcription_queue import (
+from utils.voice_message_status import (
     TRANSCRIPTION_DONE,
     TRANSCRIPTION_DROPPED,
     TRANSCRIPTION_FAILED,
     TRANSCRIPTION_PENDING,
     TRANSCRIPTION_PROCESSING,
+)
+from utils.voice_message_transcription_queue import (
     enqueue_voice_message_transcription,
 )
 

@@ -13,7 +13,7 @@ from config.channel_analysis_config import (
     CHANNEL_ANALYSIS_REMOTE_URL,
 )
 from crud import voice_message
-from utils.voice_message_transcriber import should_bypass_proxy
+from utils.network import should_bypass_proxy
 
 
 logger = logging.getLogger("ekko.channel_analyzer")

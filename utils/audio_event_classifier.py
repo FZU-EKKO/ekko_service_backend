@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import base64
-import ipaddress
 import json
 import logging
-from urllib import parse
 from urllib import request
 from urllib.error import HTTPError, URLError
 
@@ -16,22 +14,10 @@ from config.audio_event_service_config import (
     AUDIO_EVENT_REMOTE_TOP_K,
     AUDIO_EVENT_REMOTE_URL,
 )
+from utils.network import should_bypass_proxy
 
 
 logger = logging.getLogger("ekko.audio_event_classifier")
-
-
-def should_bypass_proxy(url: str) -> bool:
-    hostname = (parse.urlparse(url).hostname or "").strip().lower()
-    if not hostname:
-        return False
-    if hostname == "localhost":
-        return True
-    try:
-        address = ipaddress.ip_address(hostname)
-        return address.is_loopback or address.is_private or address.is_link_local
-    except ValueError:
-        return False
 
 
 def classify_audio_event_bytes(audio_bytes: bytes, *, audio_format: str = "wav") -> dict | None:

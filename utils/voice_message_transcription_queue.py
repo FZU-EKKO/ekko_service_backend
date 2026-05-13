@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import ipaddress
 import json
 import logging
-from urllib import parse
 from urllib import request
 from urllib.error import HTTPError, URLError
 
@@ -20,36 +18,16 @@ from config.voice_message_asr_config import (
     VOICE_MESSAGE_ASR_REMOTE_TOKEN,
 )
 from crud import voice_message
+from utils.network import should_bypass_proxy
+from utils.voice_message_status import (
+    ACTIVE_TRANSCRIPTION_STATUSES,
+)
 from utils.voice_message_transcriber import resolve_audio_format, resolve_uploaded_audio_path
 
 
 logger = logging.getLogger("ekko.voice_message_transcription_queue")
 
-TRANSCRIPTION_PENDING = "pending"
-TRANSCRIPTION_PROCESSING = "processing"
-TRANSCRIPTION_DONE = "done"
-TRANSCRIPTION_FAILED = "failed"
-TRANSCRIPTION_DROPPED = "dropped"
-
-ACTIVE_TRANSCRIPTION_STATUSES = [
-    TRANSCRIPTION_PENDING,
-    TRANSCRIPTION_PROCESSING,
-]
-
 _restore_task: asyncio.Task[None] | None = None
-
-
-def should_bypass_proxy(url: str) -> bool:
-    hostname = (parse.urlparse(url).hostname or "").strip().lower()
-    if not hostname:
-        return False
-    if hostname == "localhost":
-        return True
-    try:
-        address = ipaddress.ip_address(hostname)
-        return address.is_loopback or address.is_private or address.is_link_local
-    except ValueError:
-        return False
 
 
 def _open_json_request(*, url: str, payload: dict, headers: dict[str, str]) -> dict:
